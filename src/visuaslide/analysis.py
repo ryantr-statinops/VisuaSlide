@@ -5,7 +5,13 @@ from __future__ import annotations
 import duckdb
 import pandas as pd
 
-from visuaslide.config import FrequencyAnalysis, PercentageDenominator, VariableSchema
+from visuaslide.config import (
+    FrequencyAnalysis,
+    NumericSummaryAnalysis,
+    PercentageDenominator,
+    VariableKind,
+    VariableSchema,
+)
 from visuaslide.exceptions import DataValidationError
 from visuaslide.models import AnalysisTable
 
@@ -51,6 +57,49 @@ def calculate_frequency(
         analysis_id=specification.id,
         columns=("category", "frequency", "numerator", "denominator", "percentage"),
         rows=tuple(rows),
+    )
+
+
+def calculate_numeric_summary(
+    frame: pd.DataFrame,
+    variable: VariableSchema,
+    specification: NumericSummaryAnalysis,
+) -> AnalysisTable:
+    """Calculate descriptive numeric statistics with sample standard deviation."""
+    if specification.variable != variable.name or variable.kind != VariableKind.NUMERIC:
+        raise ValueError("numeric summary specification and variable do not match")
+    if variable.name not in frame.columns:
+        raise DataValidationError("Numeric summary input is missing a prepared variable.")
+
+    identifier = _quote_identifier(variable.name)
+    connection = duckdb.connect(database=":memory:")
+    try:
+        connection.register("survey_data", frame)
+        count, mean, median, minimum, maximum, sample_stddev = connection.execute(
+            "SELECT "
+            f"COUNT({identifier}), AVG({identifier}), MEDIAN({identifier}), "
+            f"MIN({identifier}), MAX({identifier}), STDDEV_SAMP({identifier}) "
+            "FROM survey_data"
+        ).fetchone()
+    finally:
+        connection.close()
+
+    numeric_count = int(count)
+    return AnalysisTable(
+        analysis_id=specification.id,
+        columns=("statistic", "value", "n"),
+        rows=(
+            ("count", numeric_count, numeric_count),
+            ("mean", float(mean) if mean is not None else None, numeric_count),
+            ("median", float(median) if median is not None else None, numeric_count),
+            ("min", float(minimum) if minimum is not None else None, numeric_count),
+            ("max", float(maximum) if maximum is not None else None, numeric_count),
+            (
+                "sample_stddev",
+                float(sample_stddev) if numeric_count >= 2 and sample_stddev is not None else None,
+                numeric_count,
+            ),
+        ),
     )
 
 
