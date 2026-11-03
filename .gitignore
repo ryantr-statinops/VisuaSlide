@@ -1,0 +1,35 @@
+# Python environments and caches
+.venv/
+.uv-cache/
+.uv-python/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Local project configuration and credentials
+.env
+.env.*
+!.env.example
+credentials.json
+token.json
+*.token.json
+secrets.toml
+visuaslide.local.toml
+
+# Runtime survey data and generated reports
+.visuaslide/
+data/raw/
+data/processed/
+data/output/
+*.parquet
+*.duckdb
+*.pptx
+*.pdf
+
+# Test and tool caches
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
