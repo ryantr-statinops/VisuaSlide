@@ -45,6 +45,12 @@ uv run visuaslide inspect-run --config examples/survey.example.toml --run-id <ru
 
 Snapshot validation, analysis, and run inspection operate only on local artifacts and do not read the configured Google source.
 
+## Recover a partial fake publish through the SDK
+
+The SDK stores each refresh result and publish checkpoint under the configured runtime directory. If a fake publisher raises during publication, inspect the run with `project.inspect_run(run_id)`, then resume the same run with `project.resume(run_id)`. Resume uses the saved analysis and skips completed checkpoints; it does not read the source again. The `resume` API is not exposed as a CLI command in this version.
+
+This verifies local recovery semantics only. It does not establish that Google workbook or Slides operations can be resumed safely; that requires Phase 5 sandbox acceptance.
+
 ## Checks used by the repository
 
 ```powershell

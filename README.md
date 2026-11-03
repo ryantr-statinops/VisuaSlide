@@ -6,7 +6,7 @@ VisuaSlide is a Python SDK and CLI for turning one survey tab into reproducible 
 
 ## Project status
 
-**Offline foundation implemented; recovery work in progress.** The repository now includes a Python 3.12 package, TOML schema, immutable snapshots, validation and preparation, Parquet storage, DuckDB descriptive analysis, offline SDK/CLI workflows, presentation content/layout planning, and a fake publisher. Google OAuth, Sheets ingestion, real workbook/Slides publishing, and local recovery controls are not complete yet.
+**Offline pipeline and recovery implemented through Phase 4.** The repository includes a Python 3.12 package, TOML schema, immutable snapshots, validation and preparation, Parquet storage, DuckDB descriptive analysis, offline SDK/CLI workflows, presentation content/layout planning, and a fake publisher. The offline SDK supports project locking, bounded transient retries, publish checkpoints, and resume from saved analysis results. Google OAuth, Sheets ingestion, real workbook/Slides publishing, and Google sandbox acceptance have not started.
 
 See [the offline workflow](docs/offline-workflow.md) for verified setup and run commands. All current examples and automated tests use synthetic data.
 
@@ -141,10 +141,10 @@ Local scheduling depends on the machine and required environment being available
 ## Implementation roadmap
 
 - **Wave 1 — offline foundation and analysis:** implemented locally through C01–C22. The full snapshot-to-analysis suite uses synthetic fixtures and passed locally.
-- **Wave 2 — offline pipeline and reporting:** SDK/CLI and fake publishing are implemented through C32. Recovery, retries, checkpoints, resume, and failure injection are next.
+- **Wave 2 — offline pipeline and reporting:** implemented locally through C38. SDK/CLI, fake publishing, locking, bounded retries, checkpoints, resume, idempotency, and failure recovery use synthetic data and adapters.
 - **Wave 3 — Google services and operation:** OAuth, real Sheets/Slides adapters, sandbox acceptance, and local scheduling remain unimplemented.
 
-The planned live acceptance target remains: change a response in the source, run one refresh, and see the correct aggregate table, chart, and descriptive text update together. Repeating the refresh must not duplicate managed objects, and the source must remain unchanged. That target has not yet been tested against Google.
+The planned live acceptance target remains: change a response in the source, run one refresh, and see the correct aggregate table, chart, and descriptive text update together. Repeating the refresh must not duplicate managed objects, and the source must remain unchanged. Offline regression tests cover these behaviors through fake adapters; the target has not yet been tested against Google.
 
 ## Working in this repository
 
