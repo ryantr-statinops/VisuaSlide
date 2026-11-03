@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from visuaslide.config import load_config
+from visuaslide.exceptions import ConfigurationError
 from visuaslide.models import RunStatus
 from visuaslide.pipeline import SurveyRunner
 from visuaslide.runs import RunStore
@@ -83,3 +84,36 @@ def test_runner_records_safe_failure_state_when_source_read_raises(tmp_path) -> 
     assert '"status":"failed"' in persisted
     assert '"error_code":"pipeline_failed"' in persisted
     assert "secret response payload" not in persisted
+
+
+def test_snapshot_replay_validates_and_analyzes_without_reading_source(tmp_path) -> None:
+    runner = _runner(tmp_path)
+    original = runner.refresh()
+    assert original.snapshot_id is not None
+
+    class MustNotReadSource:
+        def read(self, source):
+            raise AssertionError("snapshot replay attempted to read its source")
+
+    runner.source = MustNotReadSource()
+    validation = runner.validate_snapshot(original.snapshot_id)
+    replay = runner.analyze_snapshot(original.snapshot_id)
+
+    assert validation.is_valid
+    assert replay.status == RunStatus.READY
+    assert replay.snapshot_id == original.snapshot_id
+    assert replay.analysis is not None
+    assert replay.analysis.tables == original.analysis.tables
+
+
+def test_snapshot_replay_rejects_a_changed_effective_configuration(tmp_path) -> None:
+    runner = _runner(tmp_path)
+    original = runner.refresh()
+    assert original.snapshot_id is not None
+    changed_config = runner.config.model_copy(
+        update={"report": runner.config.report.model_copy(update={"title": "Changed title"})}
+    )
+    changed_runner = SurveyRunner(changed_config, runner.source)
+
+    with pytest.raises(ConfigurationError, match="configuration recorded"):
+        changed_runner.analyze_snapshot(original.snapshot_id)

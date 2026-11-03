@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import tempfile
@@ -19,7 +20,7 @@ from visuaslide.config import (
     VariableKind,
 )
 from visuaslide.datasets import DatasetStore
-from visuaslide.exceptions import StorageError, VisuaSlideError
+from visuaslide.exceptions import ConfigurationError, StorageError, VisuaSlideError
 from visuaslide.models import (
     AnalysisResult,
     RunResult,
@@ -123,6 +124,93 @@ class SurveyRunner:
                 error_code="pipeline_failed",
             )
             raise
+
+    def validate_snapshot(self, snapshot_id: str) -> ValidationReport:
+        """Validate a previously stored snapshot without invoking the source."""
+        stored = self.snapshots.load(snapshot_id)
+        _, report = prepare_snapshot(stored.snapshot, self.config, stored.snapshot_id)
+        return report
+
+    def analyze_snapshot(self, snapshot_id: str) -> RunResult:
+        """Replay a stored snapshot under its recorded configuration, offline."""
+        stored = self.snapshots.load(snapshot_id)
+        self._ensure_compatible_replay_config(snapshot_id)
+        manifest = self.runs.create(self.config)
+        manifest = self._update(
+            manifest,
+            stage="snapshot_replay",
+            snapshot_id=snapshot_id,
+            completed_step="snapshot",
+        )
+        try:
+            frame, report = prepare_snapshot(stored.snapshot, self.config, snapshot_id)
+            _write_json(
+                Path(self.config.project_dir).resolve()
+                / "reports"
+                / f"{manifest.run_id}.validation.json",
+                report.model_dump(mode="json"),
+            )
+            if not report.is_valid:
+                manifest = self._update(
+                    manifest,
+                    status=RunStatus.VALIDATION_FAILED,
+                    stage="validation_failed",
+                    error_code="data_validation_failed",
+                    completed_step="validation",
+                )
+                return _run_result(manifest)
+
+            manifest = self._update(
+                manifest,
+                stage="preparing_dataset",
+                completed_step="validation",
+            )
+            self.datasets.save(snapshot_id, frame, report)
+            manifest = self._update(manifest, stage="dataset_saved", completed_step="dataset")
+            analysis = analyze_frame(
+                frame,
+                self.config,
+                run_id=manifest.run_id,
+                snapshot_id=snapshot_id,
+                input_rows=report.input_rows,
+                accepted_rows=report.accepted_rows,
+            )
+            _write_json(
+                Path(self.config.project_dir).resolve() / "analyses" / f"{manifest.run_id}.json",
+                analysis.model_dump(mode="json"),
+            )
+            manifest = self._update(
+                manifest,
+                status=RunStatus.READY,
+                stage="analysis_complete",
+                completed_step="analysis",
+            )
+            return _run_result(manifest, analysis)
+        except Exception:
+            self._update(
+                manifest,
+                status=RunStatus.FAILED,
+                stage="failed",
+                error_code="snapshot_replay_failed",
+            )
+            raise
+
+    def _ensure_compatible_replay_config(self, snapshot_id: str) -> None:
+        """Reject a changed config when this snapshot already has run provenance."""
+        manifests = []
+        runs_path = Path(self.config.project_dir).resolve() / "runs"
+        if runs_path.is_dir():
+            for path in runs_path.glob("*.json"):
+                try:
+                    manifest = self.runs.load(path.stem)
+                except StorageError:
+                    continue
+                if manifest.snapshot_id == snapshot_id:
+                    manifests.append(manifest)
+        if manifests and all(item.config_hash != _config_hash(self.config) for item in manifests):
+            raise ConfigurationError(
+                "Snapshot replay requires the configuration recorded by its original run."
+            )
 
     def _update(
         self,
@@ -300,6 +388,16 @@ def _prepare_text_column(snapshot: SourceSnapshot, variable) -> PreparedColumn:
 
 def _is_blank_row(row: tuple[object, ...]) -> bool:
     return all(value is None or (isinstance(value, str) and value == "") for value in row)
+
+
+def _config_hash(config: ProjectConfig) -> str:
+    serialized = json.dumps(
+        config.model_dump(mode="json", by_alias=True),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
 def _run_result(manifest: RunManifest, analysis: AnalysisResult | None = None) -> RunResult:
