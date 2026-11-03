@@ -69,6 +69,14 @@ class SourceSnapshot(StrictModel):
         )
 
 
+class StoredSnapshot(StrictModel):
+    """Content-addressed envelope written by the local snapshot store."""
+
+    snapshot_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    content_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    snapshot: SourceSnapshot
+
+
 class SourceReader(Protocol):
     """Internal boundary for retrieving one source snapshot."""
 
