@@ -183,16 +183,70 @@ class AnalysisConfig(StrictModel):
         return self
 
 
+class ReportConfig(StrictModel):
+    """Presentation metadata supplied by the report author."""
+
+    title: str = Field(default="Survey report", min_length=1)
+    locale: str = "vi-VN"
+    display_timezone: str = "Asia/Ho_Chi_Minh"
+    research_question: str = ""
+    sampling_method: str = ""
+    collection_period: str = ""
+    conclusion: str = ""
+
+    @field_validator("title", "locale", "display_timezone")
+    @classmethod
+    def reject_blank_required_text(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("value cannot be blank")
+        return cleaned
+
+
+class OutputConfig(StrictModel):
+    """Optional IDs for application-managed reporting artifacts."""
+
+    reporting_spreadsheet_id: str | None = None
+    template_presentation_id: str | None = None
+    presentation_id: str | None = None
+
+    @field_validator("reporting_spreadsheet_id", "template_presentation_id", "presentation_id")
+    @classmethod
+    def normalize_optional_file_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("configured output file IDs cannot be blank")
+        return cleaned
+
+
 class ProjectConfig(StrictModel):
     """Minimum project configuration required to identify a source."""
 
     source: SourceConfig
     survey_schema: SurveySchema = Field(alias="schema")
     analysis: AnalysisConfig
+    report: ReportConfig = Field(default_factory=ReportConfig)
+    output: OutputConfig = Field(default_factory=OutputConfig)
     project_dir: Path = Path(".visuaslide")
 
     @model_validator(mode="after")
     def validate_analysis_references(self) -> ProjectConfig:
+        configured_output_ids = [
+            file_id
+            for file_id in (
+                self.output.reporting_spreadsheet_id,
+                self.output.template_presentation_id,
+                self.output.presentation_id,
+            )
+            if file_id is not None
+        ]
+        if self.source.spreadsheet_id in configured_output_ids:
+            raise ValueError("report output IDs must not reference the survey source file")
+        if len(configured_output_ids) != len(set(configured_output_ids)):
+            raise ValueError("report output IDs must refer to distinct files")
+
         variables = {variable.name: variable for variable in self.survey_schema.variables}
         for specification in self.analysis.specifications:
             if isinstance(specification, FrequencyAnalysis):
