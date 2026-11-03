@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from visuaslide import AnalysisResult, RunResult, SurveyProject, ValidationReport
-from visuaslide.exceptions import TransientAdapterError
+from visuaslide.exceptions import PublishingError, TransientAdapterError
 from visuaslide.models import RunStatus
 from visuaslide.publisher import FakeReportPublisher
 from visuaslide.retry import RetryPolicy
@@ -69,12 +69,17 @@ def test_sdk_retries_transient_publisher_failure_but_keeps_one_output_set(tmp_pa
     delays = []
 
     class FlakyPublisher:
-        def publish(self, content):
+        def __init__(self) -> None:
+            self.mapping = fake_publisher.mapping
+
+        def publish_step(self, step, content, plan):
             nonlocal attempts
             attempts += 1
             if attempts == 1:
                 raise TransientAdapterError("temporary publisher outage")
-            return fake_publisher.publish(content)
+            result = fake_publisher.publish_step(step, content, plan)
+            self.mapping = fake_publisher.mapping
+            return result
 
     project.publisher = FlakyPublisher()
     project.retry_policy = RetryPolicy(max_attempts=2, initial_backoff_seconds=0.05)
@@ -83,6 +88,35 @@ def test_sdk_retries_transient_publisher_failure_but_keeps_one_output_set(tmp_pa
     result = project.refresh()
 
     assert result.status == RunStatus.COMPLETED
-    assert attempts == 2
+    assert attempts == 4
     assert delays == [0.05]
     assert len(fake_publisher.objects) == 17
+
+
+def test_sdk_records_partial_publish_checkpoint_and_never_reports_completion(tmp_path) -> None:
+    project, _ = _project(tmp_path)
+
+    class FailsDuringCharts(FakeReportPublisher):
+        def publish_step(self, step, content, plan):
+            if step == "charts":
+                raise PublishingError("simulated chart failure")
+            return super().publish_step(step, content, plan)
+
+    publisher = FailsDuringCharts()
+    project.publisher = publisher
+    try:
+        project.refresh()
+    except PublishingError as exc:
+        assert str(exc) == "simulated chart failure"
+    else:
+        raise AssertionError("partial publishing should raise")
+
+    run_paths = list((tmp_path / "runtime" / "runs").glob("*.json"))
+    manifest = project._runs.load(run_paths[0].stem)
+    assert manifest.status == RunStatus.FAILED
+    assert manifest.stage == "publish_failed"
+    assert "workbook" in manifest.completed_steps
+    assert "charts" not in manifest.completed_steps
+    assert "slides" not in manifest.completed_steps
+    assert len(publisher.workbook_objects) == 4
+    assert publisher.objects == {}

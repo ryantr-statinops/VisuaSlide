@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 from visuaslide.exceptions import PublishingError
 from visuaslide.layouts import PresentationLayout, build_default_layout
@@ -24,7 +25,8 @@ class FakeReportPublisher:
 
     def __init__(self) -> None:
         self._mapping = ManagedObjectMap()
-        self._objects: dict[str, dict[str, object]] = {}
+        self._workbook_objects: dict[str, dict[str, object]] = {}
+        self._slide_objects: dict[str, dict[str, object]] = {}
         self._layout: PresentationLayout | None = None
 
     @property
@@ -33,22 +35,55 @@ class FakeReportPublisher:
 
     @property
     def objects(self) -> dict[str, dict[str, object]]:
-        return {object_id: payload.copy() for object_id, payload in self._objects.items()}
+        return {object_id: payload.copy() for object_id, payload in self._slide_objects.items()}
+
+    @property
+    def workbook_objects(self) -> dict[str, dict[str, object]]:
+        return {object_id: payload.copy() for object_id, payload in self._workbook_objects.items()}
 
     @property
     def layout(self) -> PresentationLayout | None:
         return self._layout
 
     def publish(self, content: PresentationContent) -> FakePublishResult:
-        """Validate layout first, then apply content to stable fake objects."""
+        """Validate layout, then apply all fake workbook and slide checkpoints."""
         layout = build_default_layout(content)
         plan = plan_report_update(content, self._mapping)
-        next_objects = {object_id: payload.copy() for object_id, payload in self._objects.items()}
+        for step in ("workbook", "charts", "slides"):
+            self.publish_step(step, content, plan)
+        self._layout = layout
+        return FakePublishResult(
+            plan=plan,
+            layout=layout,
+            managed_object_count=len(self._slide_objects),
+        )
 
-        for operation in plan.operations:
+    def publish_step(
+        self,
+        step: Literal["workbook", "charts", "slides"],
+        content: PresentationContent,
+        plan: ReportUpdatePlan,
+    ) -> None:
+        """Apply one idempotent local checkpoint to fake workbook/deck state."""
+        if step not in {"workbook", "charts", "slides"}:
+            raise PublishingError("Unknown report publishing checkpoint.")
+        layout = build_default_layout(content)
+        if step == "workbook":
+            operations = [item for item in plan.operations if item.kind == "table"]
+            target = self._workbook_objects
+        elif step == "charts":
+            operations = [item for item in plan.operations if item.kind == "chart"]
+            target = self._workbook_objects
+        else:
+            operations = list(plan.operations)
+            target = self._slide_objects
+
+        next_objects = {object_id: payload.copy() for object_id, payload in target.items()}
+        applied_keys = set()
+        for operation in operations:
             exists = operation.object_id in next_objects
             if operation.action == "create":
-                if exists:
+                if exists and next_objects[operation.object_id] != operation.payload:
                     raise PublishingError("A new managed object ID already exists in the output.")
                 next_objects[operation.object_id] = operation.payload.copy()
             elif operation.action == "update":
@@ -57,12 +92,18 @@ class FakeReportPublisher:
                 next_objects[operation.object_id] = operation.payload.copy()
             elif not exists:
                 raise PublishingError("An unchanged managed object is missing from the output.")
+            applied_keys.add(operation.object_key)
 
-        self._objects = next_objects
-        self._mapping = plan.mapping
-        self._layout = layout
-        return FakePublishResult(
-            plan=plan,
-            layout=layout,
-            managed_object_count=len(self._objects),
+        target.clear()
+        target.update(next_objects)
+        entries = {entry.object_key: entry for entry in self._mapping.entries}
+        entries.update(
+            {
+                entry.object_key: entry
+                for entry in plan.mapping.entries
+                if entry.object_key in applied_keys
+            }
         )
+        self._mapping = ManagedObjectMap(entries=tuple(entries.values()))
+        if step == "slides":
+            self._layout = layout

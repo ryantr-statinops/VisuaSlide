@@ -9,19 +9,30 @@ from typing import Protocol
 
 from visuaslide.config import ProjectConfig, load_config
 from visuaslide.exceptions import ConfigurationError, DataValidationError, PublishingError
+from visuaslide.layouts import build_default_layout
 from visuaslide.models import AnalysisResult, RunResult, RunStatus, ValidationReport
 from visuaslide.pipeline import SurveyRunner
 from visuaslide.reporting import PresentationContent
 from visuaslide.retry import RetryPolicy, call_with_retries
 from visuaslide.runs import RunManifest, RunStore
 from visuaslide.snapshots import SourceReader
+from visuaslide.update_plan import ReportUpdatePlan, plan_report_update
 
 
 class ReportPublisher(Protocol):
     """Boundary implemented by offline and Google reporting adapters."""
 
-    def publish(self, content: PresentationContent):
-        """Apply one adapter-neutral presentation content object."""
+    @property
+    def mapping(self):
+        """Return the persisted mapping of managed output objects."""
+
+    def publish_step(
+        self,
+        step: str,
+        content: PresentationContent,
+        plan: ReportUpdatePlan,
+    ) -> None:
+        """Apply one workbook, chart, or Slides checkpoint."""
 
 
 class _UnavailableSource:
@@ -100,11 +111,28 @@ class SurveyProject:
 
         try:
             content = build_presentation_content(result.analysis, self.config.report)
-            call_with_retries(
-                lambda: self.publisher.publish(content),
-                policy=self.retry_policy,
-                **({"sleep": self.sleep} if self.sleep is not None else {}),
+            build_default_layout(content)
+            publish_step = getattr(self.publisher, "publish_step", None)
+            if publish_step is None:
+                raise PublishingError("The configured publisher does not support checkpoints.")
+            plan = plan_report_update(content, self.publisher.mapping)
+            self._update_manifest(
+                result.run_id,
+                status=RunStatus.PUBLISHING,
+                stage="publishing_workbook",
             )
+            for step in ("workbook", "charts", "slides"):
+                call_with_retries(
+                    lambda current_step=step: publish_step(current_step, content, plan),
+                    policy=self.retry_policy,
+                    **({"sleep": self.sleep} if self.sleep is not None else {}),
+                )
+                self._update_manifest(
+                    result.run_id,
+                    status=RunStatus.PUBLISHING,
+                    stage=f"{step}_published",
+                    completed_step=step,
+                )
         except Exception as exc:
             self._update_manifest(
                 result.run_id,
