@@ -88,10 +88,25 @@ class FakeReportPublisher:
                 next_objects[operation.object_id] = operation.payload.copy()
             elif operation.action == "update":
                 if not exists:
-                    raise PublishingError("A mapped managed object is missing from the output.")
-                next_objects[operation.object_id] = operation.payload.copy()
+                    if (
+                        step == "slides"
+                        and operation.kind in {"table", "chart"}
+                        and operation.object_id in self._workbook_objects
+                    ):
+                        next_objects[operation.object_id] = operation.payload.copy()
+                    else:
+                        raise PublishingError("A mapped managed object is missing from the output.")
+                else:
+                    next_objects[operation.object_id] = operation.payload.copy()
             elif not exists:
-                raise PublishingError("An unchanged managed object is missing from the output.")
+                if (
+                    step == "slides"
+                    and operation.kind in {"table", "chart"}
+                    and operation.object_id in self._workbook_objects
+                ):
+                    next_objects[operation.object_id] = operation.payload.copy()
+                else:
+                    raise PublishingError("An unchanged managed object is missing from the output.")
             applied_keys.add(operation.object_key)
 
         target.clear()

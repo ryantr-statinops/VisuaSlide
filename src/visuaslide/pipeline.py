@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import tempfile
@@ -37,7 +36,7 @@ from visuaslide.preparation import (
     prepare_numeric_column,
 )
 from visuaslide.retry import RetryPolicy, call_with_retries
-from visuaslide.runs import RunManifest, RunStore
+from visuaslide.runs import RunManifest, RunStore, effective_config_hash
 from visuaslide.snapshots import SourceReader, SourceSnapshot, utc_now
 from visuaslide.storage import SnapshotStore
 from visuaslide.validation import normalize_trailing_cells, validate_snapshot_structure
@@ -62,8 +61,10 @@ class SurveyRunner:
         self.datasets = DatasetStore(config.project_dir / "datasets")
         self.runs = RunStore(config.project_dir)
 
-    def refresh(self) -> RunResult:
+    def refresh(self, *, acquire_lock: bool = True) -> RunResult:
         """Read a complete source snapshot and produce a local analysis run."""
+        if not acquire_lock:
+            return self._refresh_locked()
         with ProjectLock(self.config.project_dir):
             return self._refresh_locked()
 
@@ -227,7 +228,9 @@ class SurveyRunner:
                     continue
                 if manifest.snapshot_id == snapshot_id:
                     manifests.append(manifest)
-        if manifests and all(item.config_hash != _config_hash(self.config) for item in manifests):
+        if manifests and all(
+            item.config_hash != effective_config_hash(self.config) for item in manifests
+        ):
             raise ConfigurationError(
                 "Snapshot replay requires the configuration recorded by its original run."
             )
@@ -408,16 +411,6 @@ def _prepare_text_column(snapshot: SourceSnapshot, variable) -> PreparedColumn:
 
 def _is_blank_row(row: tuple[object, ...]) -> bool:
     return all(value is None or (isinstance(value, str) and value == "") for value in row)
-
-
-def _config_hash(config: ProjectConfig) -> str:
-    serialized = json.dumps(
-        config.model_dump(mode="json", by_alias=True),
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    )
-    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
 def _run_result(manifest: RunManifest, analysis: AnalysisResult | None = None) -> RunResult:

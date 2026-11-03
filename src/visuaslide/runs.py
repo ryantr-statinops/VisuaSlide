@@ -60,7 +60,7 @@ class RunManifest(StrictModel):
             updated_at=now,
             source_identity=source_identity,
             source_hash=_sha256(source_identity),
-            config_hash=_sha256(config.model_dump(mode="json", by_alias=True)),
+            config_hash=effective_config_hash(config),
             sdk_version=__version__,
         )
 
@@ -112,6 +112,11 @@ class RunStore:
 def _sha256(value: object) -> str:
     serialized = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def effective_config_hash(config: ProjectConfig) -> str:
+    """Return the canonical hash used to bind a run to its effective config."""
+    return _sha256(config.model_dump(mode="json", by_alias=True))
 
 
 def _atomic_write(path: Path, content: bytes, *, replace: bool) -> None:

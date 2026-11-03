@@ -8,13 +8,19 @@ from pathlib import Path
 from typing import Protocol
 
 from visuaslide.config import ProjectConfig, load_config
-from visuaslide.exceptions import ConfigurationError, DataValidationError, PublishingError
+from visuaslide.exceptions import (
+    ConfigurationError,
+    DataValidationError,
+    PublishingError,
+    StorageError,
+)
 from visuaslide.layouts import build_default_layout
+from visuaslide.locking import ProjectLock
 from visuaslide.models import AnalysisResult, RunResult, RunStatus, ValidationReport
 from visuaslide.pipeline import SurveyRunner
 from visuaslide.reporting import PresentationContent
 from visuaslide.retry import RetryPolicy, call_with_retries
-from visuaslide.runs import RunManifest, RunStore
+from visuaslide.runs import RunManifest, RunStore, effective_config_hash
 from visuaslide.snapshots import SourceReader
 from visuaslide.update_plan import ReportUpdatePlan, plan_report_update
 
@@ -101,48 +107,28 @@ class SurveyProject:
         """Acquire and analyze the source, optionally applying a report publisher."""
         if not dry_run and self.publisher is None:
             raise PublishingError("No report publisher is configured; use dry_run=True offline.")
-        result = self._runner.refresh()
-        if result.status != RunStatus.READY or result.analysis is None:
-            return result
         if dry_run:
+            result = self._runner.refresh()
+            if result.status != RunStatus.READY or result.analysis is None:
+                return result
             return self._update_run_result(result, stage="dry_run_complete")
 
-        from visuaslide.reporting import build_presentation_content
-
-        try:
-            content = build_presentation_content(result.analysis, self.config.report)
-            build_default_layout(content)
-            publish_step = getattr(self.publisher, "publish_step", None)
-            if publish_step is None:
-                raise PublishingError("The configured publisher does not support checkpoints.")
-            plan = plan_report_update(content, self.publisher.mapping)
-            self._update_manifest(
-                result.run_id,
-                status=RunStatus.PUBLISHING,
-                stage="publishing_workbook",
-            )
-            for step in ("workbook", "charts", "slides"):
-                call_with_retries(
-                    lambda current_step=step: publish_step(current_step, content, plan),
-                    policy=self.retry_policy,
-                    **({"sleep": self.sleep} if self.sleep is not None else {}),
-                )
+        with ProjectLock(self.config.project_dir):
+            result = self._runner.refresh(acquire_lock=False)
+            if result.status != RunStatus.READY or result.analysis is None:
+                return result
+            try:
+                self._publish_checkpoints(result.run_id, result.analysis)
+            except Exception as exc:
                 self._update_manifest(
                     result.run_id,
-                    status=RunStatus.PUBLISHING,
-                    stage=f"{step}_published",
-                    completed_step=step,
+                    status=RunStatus.FAILED,
+                    stage="publish_failed",
+                    error_code="publish_failed",
                 )
-        except Exception as exc:
-            self._update_manifest(
-                result.run_id,
-                status=RunStatus.FAILED,
-                stage="publish_failed",
-                error_code="publish_failed",
-            )
-            if isinstance(exc, PublishingError):
-                raise
-            raise PublishingError("Report publishing failed; inspect local run state.") from exc
+                if isinstance(exc, PublishingError):
+                    raise
+                raise PublishingError("Report publishing failed; inspect local run state.") from exc
         return self._update_run_result(
             result,
             status=RunStatus.COMPLETED,
@@ -177,11 +163,85 @@ class SurveyProject:
         return bootstrap()
 
     def resume(self, run_id: str) -> RunResult:
-        """Delegate recovery to an adapter that supports run resumption."""
-        resume = getattr(self.publisher, "resume", None)
-        if resume is None:
-            raise PublishingError("Run resume is not available in the configured publisher.")
-        return resume(run_id)
+        """Resume publication from the immutable analysis saved for this run."""
+        manifest = self._runs.load(run_id)
+        if manifest.status == RunStatus.COMPLETED:
+            return self.inspect_run(run_id)
+        if manifest.status not in {RunStatus.READY, RunStatus.PUBLISHING, RunStatus.FAILED}:
+            raise PublishingError("This run is not in a resumable publication state.")
+        if manifest.snapshot_id is None:
+            raise PublishingError("This run has no stored source snapshot to resume.")
+        if manifest.config_hash != effective_config_hash(self.config):
+            raise ConfigurationError(
+                "Resume requires the effective configuration recorded by this run."
+            )
+        if self.publisher is None:
+            raise PublishingError("No report publisher is configured for run recovery.")
+
+        analysis_path = Path(self.config.project_dir).resolve() / "analyses" / f"{run_id}.json"
+        try:
+            analysis = AnalysisResult.model_validate_json(analysis_path.read_bytes())
+        except (OSError, ValueError) as exc:
+            raise StorageError("Stored analysis result is unavailable for run recovery.") from exc
+        if analysis.run_id != run_id or analysis.snapshot_id != manifest.snapshot_id:
+            raise StorageError("Stored analysis provenance does not match this run.")
+
+        with ProjectLock(self.config.project_dir):
+            try:
+                self._publish_checkpoints(run_id, analysis)
+            except Exception as exc:
+                self._update_manifest(
+                    run_id,
+                    status=RunStatus.FAILED,
+                    stage="resume_failed",
+                    error_code="resume_failed",
+                )
+                if isinstance(exc, PublishingError):
+                    raise
+                raise PublishingError("Run recovery failed; inspect local run state.") from exc
+        result = RunResult(
+            run_id=run_id,
+            status=RunStatus.READY,
+            stage="analysis_complete",
+            updated_at=analysis.created_at,
+            snapshot_id=analysis.snapshot_id,
+            analysis=analysis,
+        )
+        return self._update_run_result(
+            result,
+            status=RunStatus.COMPLETED,
+            stage="published",
+            completed_step="publish",
+        )
+
+    def _publish_checkpoints(self, run_id: str, analysis: AnalysisResult) -> None:
+        from visuaslide.reporting import build_presentation_content
+
+        publish_step = getattr(self.publisher, "publish_step", None)
+        if publish_step is None:
+            raise PublishingError("The configured publisher does not support checkpoints.")
+        content = build_presentation_content(analysis, self.config.report)
+        build_default_layout(content)
+        plan = plan_report_update(content, self.publisher.mapping)
+        manifest = self._update_manifest(
+            run_id,
+            status=RunStatus.PUBLISHING,
+            stage="publishing",
+        )
+        for step in ("workbook", "charts", "slides"):
+            if step in manifest.completed_steps:
+                continue
+            call_with_retries(
+                lambda current_step=step: publish_step(current_step, content, plan),
+                policy=self.retry_policy,
+                **({"sleep": self.sleep} if self.sleep is not None else {}),
+            )
+            manifest = self._update_manifest(
+                run_id,
+                status=RunStatus.PUBLISHING,
+                stage=f"{step}_published",
+                completed_step=step,
+            )
 
     def _update_run_result(
         self,

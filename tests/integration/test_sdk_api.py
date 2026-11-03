@@ -2,8 +2,10 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from visuaslide import AnalysisResult, RunResult, SurveyProject, ValidationReport
-from visuaslide.exceptions import PublishingError, TransientAdapterError
+from visuaslide.exceptions import ConfigurationError, PublishingError, TransientAdapterError
 from visuaslide.models import RunStatus
 from visuaslide.publisher import FakeReportPublisher
 from visuaslide.retry import RetryPolicy
@@ -120,3 +122,73 @@ def test_sdk_records_partial_publish_checkpoint_and_never_reports_completion(tmp
     assert "slides" not in manifest.completed_steps
     assert len(publisher.workbook_objects) == 4
     assert publisher.objects == {}
+
+
+def test_sdk_resumes_from_saved_analysis_and_skips_completed_workbook_checkpoint(tmp_path) -> None:
+    project, _ = _project(tmp_path)
+
+    class FailsOnceAtCharts(FakeReportPublisher):
+        fail_next = True
+
+        def publish_step(self, step, content, plan):
+            if step == "charts" and self.fail_next:
+                self.fail_next = False
+                raise PublishingError("temporary chart failure")
+            return super().publish_step(step, content, plan)
+
+    publisher = FailsOnceAtCharts()
+    project.publisher = publisher
+    try:
+        project.refresh()
+    except PublishingError as exc:
+        assert str(exc) == "temporary chart failure"
+    else:
+        raise AssertionError("first chart checkpoint should fail")
+
+    manifest_path = next((tmp_path / "runtime" / "runs").glob("*.json"))
+    run_id = manifest_path.stem
+    original = project.inspect_run(run_id)
+    assert original.analysis is not None
+
+    class MustNotReadSource:
+        def read(self, source):
+            raise AssertionError("resume attempted to read the configured source")
+
+    project.source = MustNotReadSource()
+    project._runner.source = project.source
+    resumed = project.resume(run_id)
+    manifest = project._runs.load(run_id)
+
+    assert resumed.status == RunStatus.COMPLETED
+    assert resumed.snapshot_id == original.snapshot_id
+    assert resumed.analysis == original.analysis
+    assert manifest.completed_steps[-4:] == ("workbook", "charts", "slides", "publish")
+    assert len(publisher.workbook_objects) == 7
+    assert len(publisher.objects) == 17
+
+
+def test_sdk_resume_rejects_a_changed_effective_configuration(tmp_path) -> None:
+    project, _ = _project(tmp_path)
+
+    class FailsAtCharts(FakeReportPublisher):
+        def publish_step(self, step, content, plan):
+            if step == "charts":
+                raise PublishingError("chart checkpoint failed")
+            return super().publish_step(step, content, plan)
+
+    publisher = FailsAtCharts()
+    project.publisher = publisher
+    try:
+        project.refresh()
+    except PublishingError:
+        pass
+    else:
+        raise AssertionError("chart checkpoint should fail before resume")
+    run_id = next((tmp_path / "runtime" / "runs").glob("*.json")).stem
+    changed_config = project.config.model_copy(
+        update={"report": project.config.report.model_copy(update={"title": "Changed report"})}
+    )
+    changed_project = SurveyProject(changed_config, publisher=publisher)
+
+    with pytest.raises(ConfigurationError, match="effective configuration"):
+        changed_project.resume(run_id)
