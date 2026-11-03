@@ -54,7 +54,9 @@ def test_datetime_preparation_rejects_mismatch_type_and_ambiguous_local_time() -
 
 
 def test_datetime_preparation_preserves_allowed_missing_and_reports_required() -> None:
-    prepared = prepare_datetime_column(_snapshot((("", ""),)), _variable(required=True))
+    prepared = prepare_datetime_column(
+        _snapshot((("", "response exists"),)), _variable(required=True)
+    )
 
     assert prepared.values == (None,)
     assert prepared.issues[0].code == "required_value_missing"

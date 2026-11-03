@@ -52,7 +52,9 @@ def test_categorical_preparation_only_trims_when_declared() -> None:
 
 
 def test_categorical_preparation_reports_required_missing_values() -> None:
-    prepared = prepare_categorical_column(_snapshot((("", ""),)), _variable(required=True))
+    prepared = prepare_categorical_column(
+        _snapshot((("", "response exists"),)), _variable(required=True)
+    )
 
     assert not prepared.is_valid
     assert prepared.issues[0].code == "required_value_missing"

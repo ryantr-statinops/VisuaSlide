@@ -60,6 +60,7 @@ def prepare_categorical_column(
         else:
             value = row[column_index]
 
+        required_missing = value is None
         if value is None:
             normalized: Scalar = None
         elif not isinstance(value, str):
@@ -75,6 +76,7 @@ def prepare_categorical_column(
         else:
             normalized_text = value.strip() if variable.trim_whitespace else value
             if normalized_text in missing_values:
+                required_missing = True
                 normalized = None
             elif normalized_text not in allowed_categories:
                 issues.append(
@@ -89,7 +91,7 @@ def prepare_categorical_column(
             else:
                 normalized = normalized_text
 
-        if normalized is None and variable.required:
+        if required_missing and variable.required and not _is_blank_source_row(row):
             issues.append(
                 ValidationIssue(
                     code="required_value_missing",
@@ -140,7 +142,7 @@ def prepare_numeric_column(snapshot: SourceSnapshot, variable: VariableSchema) -
         )
         if is_missing:
             normalized: Scalar = None
-            if variable.required:
+            if variable.required and not _is_blank_source_row(row):
                 issues.append(
                     ValidationIssue(
                         code="required_value_missing",
@@ -217,7 +219,7 @@ def prepare_datetime_column(snapshot: SourceSnapshot, variable: VariableSchema) 
         )
         if is_missing:
             normalized: Scalar = None
-            if variable.required:
+            if variable.required and not _is_blank_source_row(row):
                 issues.append(
                     ValidationIssue(
                         code="required_value_missing",
@@ -296,3 +298,7 @@ def _localize_unambiguous(value: datetime, timezone: ZoneInfo) -> datetime:
     if not valid or (len(valid) == 2 and valid[0].utcoffset() != valid[1].utcoffset()):
         raise ValueError("local datetime cannot be localized unambiguously")
     return valid[0]
+
+
+def _is_blank_source_row(row: tuple[object, ...]) -> bool:
+    return all(value is None or (isinstance(value, str) and value == "") for value in row)
