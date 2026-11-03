@@ -2,11 +2,13 @@
 
 **Survey data to reproducible analysis and refreshable presentations.**
 
-VisuaSlide is a planned Python SDK and CLI that connects one survey tab in Google Sheets to a repeatable analysis and Google Slides reporting workflow. It brings data engineering, data analysis, and presentation generation into a project that can be run manually and, later, on a local schedule.
+VisuaSlide is a Python SDK and CLI for turning one survey tab into reproducible analysis and refreshable presentation content. The current implementation supports the offline workflow with synthetic data and fake adapters; Google service integration is a later phase.
 
 ## Project status
 
-**Foundation documentation only.** The technical direction has been accepted, but the SDK, CLI, Google integrations, analysis pipeline, templates, packaging, and CI are not implemented yet. This repository currently provides project guidance and the overview below; it does not provide installation or execution commands.
+**Offline foundation implemented; recovery work in progress.** The repository now includes a Python 3.12 package, TOML schema, immutable snapshots, validation and preparation, Parquet storage, DuckDB descriptive analysis, offline SDK/CLI workflows, presentation content/layout planning, and a fake publisher. Google OAuth, Sheets ingestion, real workbook/Slides publishing, and local recovery controls are not complete yet.
+
+See [the offline workflow](docs/offline-workflow.md) for verified setup and run commands. All current examples and automated tests use synthetic data.
 
 Documentation uses four status labels:
 
@@ -65,11 +67,11 @@ Keep source access, preparation, analysis, storage, reporting, and orchestration
 
 ## Technology direction — Accepted
 
-These are selected technologies for implementation, not installed or verified repository dependencies.
+The offline stack is locked in `uv.lock` and verified on Windows with CPython 3.12. Google client libraries are installed, but live Google calls have not yet been implemented or verified.
 
 | Responsibility | Technology | Intended use |
 | --- | --- | --- |
-| Runtime | Python; CPython 3.12 baseline to verify | Run the local SDK and CLI. |
+| Runtime | CPython 3.12 | Run the local SDK and CLI. |
 | Project management | uv, `pyproject.toml`, `uv.lock` | Manage dependencies and reproduce development environments. |
 | Packaging | Hatchling | Build Python distributions. |
 | Google integration | `google-api-python-client` | Call Sheets, Slides, and Drive APIs. |
@@ -138,18 +140,14 @@ Local scheduling depends on the machine and required environment being available
 
 ## Implementation roadmap
 
-All milestones below are **Accepted direction** and **not implemented**.
+- **Wave 1 — offline foundation and analysis:** implemented locally through C01–C22. The full snapshot-to-analysis suite uses synthetic fixtures and passed locally.
+- **Wave 2 — offline pipeline and reporting:** SDK/CLI and fake publishing are implemented through C32. Recovery, retries, checkpoints, resume, and failure injection are next.
+- **Wave 3 — Google services and operation:** OAuth, real Sheets/Slides adapters, sandbox acceptance, and local scheduling remain unimplemented.
 
-1. **Google integration spike:** read the selected tab, create application-managed output files, generate a chart, embed and refresh it in Slides, and verify authentication and Vietnamese layout.
-2. **Project foundation:** introduce packaging, configuration, raw snapshots, schema validation, synthetic fixtures, and CI.
-3. **Analysis:** implement clean datasets, documented statistical conventions, aggregate results, and snapshot replay.
-4. **Reporting:** implement templates, object mappings, consistent chart/table/text updates, partial-failure handling, and visual verification.
-5. **Automation:** stabilize the CLI, prevent overlapping runs, document credential recovery, and add local scheduling.
-
-The first end-to-end acceptance target is: change a response in the source, run one refresh, and see the correct aggregate table, chart, and descriptive text update together. Repeating the refresh must not duplicate slides or charts. Source data must remain unchanged.
+The planned live acceptance target remains: change a response in the source, run one refresh, and see the correct aggregate table, chart, and descriptive text update together. Repeating the refresh must not duplicate managed objects, and the source must remain unchanged. That target has not yet been tested against Google.
 
 ## Working in this repository
 
-Read [AGENTS.md](AGENTS.md) before contributing. At this stage there are no established build, test, lint, or installation commands. Add verified instructions when the corresponding tooling exists; planned interfaces should be labeled conceptual until executable.
+Read [AGENTS.md](AGENTS.md) before contributing. Install the locked environment with `uv sync --all-groups`; verified test and packaging commands are listed in [the offline workflow](docs/offline-workflow.md).
 
 Documentation changes should be checked for structure, relative links, consistent status labels, and a clean Git diff. Future implementation checks should cover independently calculated statistical fixtures, invalid inputs, source edits/deletions, repeated refreshes, write-target protection, and partial publishing failures. Live Google integration checks should use dedicated synthetic sandbox files and remain separate from default CI.
