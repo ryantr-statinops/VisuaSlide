@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from visuaslide.config import VariableKind, VariableSchema
@@ -102,3 +103,72 @@ def prepare_categorical_column(
         values=tuple(values),
         issues=tuple(issues),
     )
+
+
+def prepare_numeric_column(snapshot: SourceSnapshot, variable: VariableSchema) -> PreparedColumn:
+    """Validate numeric cells without locale guessing or non-finite values."""
+    if variable.kind != VariableKind.NUMERIC:
+        raise ValueError("prepare_numeric_column requires a numeric variable")
+
+    try:
+        column_index = snapshot.headers.index(variable.source_header)
+    except ValueError:
+        return PreparedColumn(
+            variable_name=variable.name,
+            values=(),
+            issues=(
+                ValidationIssue(
+                    code="missing_configured_header",
+                    message="A configured survey column is missing from the source.",
+                    variable=variable.name,
+                    source_row=snapshot.metadata.header_row,
+                ),
+            ),
+        )
+
+    values: list[Scalar] = []
+    issues: list[ValidationIssue] = []
+    missing_values = set(variable.missing_values)
+    for offset, row in enumerate(snapshot.rows):
+        source_row = snapshot.source_first_row + offset
+        value = row[column_index] if column_index < len(row) else None
+        is_missing = value is None or (
+            isinstance(value, str)
+            and (value.strip() if variable.trim_whitespace else value) in missing_values
+        )
+        if is_missing:
+            normalized: Scalar = None
+            if variable.required:
+                issues.append(
+                    ValidationIssue(
+                        code="required_value_missing",
+                        message="A required numeric value is missing.",
+                        variable=variable.name,
+                        source_row=source_row,
+                    )
+                )
+        elif isinstance(value, bool) or not isinstance(value, (int, float)):
+            normalized = None
+            issues.append(
+                ValidationIssue(
+                    code="invalid_numeric_type",
+                    message="A numeric value must be a finite number or an allowed missing value.",
+                    variable=variable.name,
+                    source_row=source_row,
+                )
+            )
+        elif not math.isfinite(value):
+            normalized = None
+            issues.append(
+                ValidationIssue(
+                    code="non_finite_numeric",
+                    message="A numeric value must be finite.",
+                    variable=variable.name,
+                    source_row=source_row,
+                )
+            )
+        else:
+            normalized = value
+        values.append(normalized)
+
+    return PreparedColumn(variable_name=variable.name, values=tuple(values), issues=tuple(issues))
