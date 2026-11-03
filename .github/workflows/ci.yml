@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  offline:
+    name: Windows / Python 3.12
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      UV_CACHE_DIR: ${{ runner.temp }}\visuaslide-uv-cache
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.3.2
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install locked project dependencies
+        run: uv sync --locked --group dev
+
+      - name: Check lint
+        run: uv run --locked ruff check src tests
+
+      - name: Check formatting
+        run: uv run --locked ruff format --check src tests
+
+      - name: Run offline tests
+        run: uv run --locked pytest
+
+      - name: Build wheel
+        run: uv build --wheel --out-dir "${{ runner.temp }}\wheel-check"
+
+      - name: Import built wheel outside the source tree
+        run: >-
+          python -I -c "import glob, os, sys; wheels=glob.glob(os.path.join(os.environ['RUNNER_TEMP'], 'wheel-check', '*.whl')); assert len(wheels)==1, wheels; sys.path.insert(0, wheels[0]); import visuaslide; assert visuaslide.__version__ == '0.1.0'; print(visuaslide.__version__)"
