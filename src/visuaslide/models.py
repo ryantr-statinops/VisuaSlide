@@ -30,6 +30,7 @@ class ValidationReport(StrictModel):
     accepted_rows: int = Field(ge=0)
     invalid_rows: int = Field(ge=0)
     issues: tuple[ValidationIssue, ...] = ()
+    dataset_issues: tuple[ValidationIssue, ...] = ()
 
     @model_validator(mode="after")
     def check_row_counts(self) -> ValidationReport:
@@ -41,7 +42,7 @@ class ValidationReport(StrictModel):
 
     @property
     def is_valid(self) -> bool:
-        return self.invalid_rows == 0
+        return self.invalid_rows == 0 and not self.dataset_issues
 
 
 class AnalysisTable(StrictModel):
