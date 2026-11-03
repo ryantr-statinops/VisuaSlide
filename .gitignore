@@ -13,16 +13,20 @@ dist/
 .env.*
 !.env.example
 credentials.json
+credentials*.json
+client_secret*.json
 token.json
 *.token.json
 secrets.toml
-visuaslide.local.toml
+*.local.toml
 
 # Runtime survey data and generated reports
 .visuaslide/
 data/raw/
 data/processed/
 data/output/
+output/
+artifacts/
 *.parquet
 *.duckdb
 *.pptx
