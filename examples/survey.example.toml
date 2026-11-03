@@ -1,0 +1,34 @@
+project_dir = "../.visuaslide/example-run"
+
+[source]
+spreadsheet_id = "REPLACE_WITH_YOUR_GOOGLE_SHEETS_ID"
+sheet_id = 0
+header_row = 1
+column_range = "A:F"
+
+[schema]
+variables = [
+  { name = "response_id", source_header = "Response ID", kind = "text", required = true },
+  { name = "study_year", source_header = "Study year", kind = "categorical", required = true, categories = ["Year 1", "Year 2", "Year 3", "Year 4"] },
+  { name = "uses_tool", source_header = "Uses tool", kind = "categorical", categories = ["Yes", "No"] },
+  { name = "score", source_header = "Score", kind = "numeric" },
+  { name = "submitted_at", source_header = "Submitted at", kind = "datetime", datetime_format = "%Y-%m-%d %H:%M", timezone = "Asia/Ho_Chi_Minh" },
+  { name = "comment", source_header = "Comment", kind = "text", trim_whitespace = true },
+]
+
+[analysis]
+specifications = [
+  { id = "study_year_counts", kind = "frequency", variable = "study_year", denominator = "non_missing" },
+  { id = "tool_use_rate", kind = "frequency", variable = "uses_tool", denominator = "non_missing" },
+  { id = "score_summary", kind = "numeric_summary", variable = "score" },
+  { id = "year_by_tool", kind = "crosstab", row_variable = "study_year", column_variable = "uses_tool", percentage_basis = "row" },
+]
+
+[report]
+title = "Synthetic student survey"
+locale = "en-US"
+display_timezone = "Asia/Ho_Chi_Minh"
+research_question = "How do tool use and scores vary across study years?"
+sampling_method = "Synthetic data for software examples only"
+collection_period = "2026-10-10"
+conclusion = "Do not interpret synthetic responses as research findings."

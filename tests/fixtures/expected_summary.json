@@ -1,0 +1,32 @@
+{
+  "input_rows": 5,
+  "blank_rows": 0,
+  "accepted_rows": 5,
+  "study_year_counts": {
+    "Year 1": 2,
+    "Year 2": 2,
+    "Year 3": 1,
+    "Year 4": 0
+  },
+  "tool_use_counts": {
+    "Yes": 3,
+    "No": 1
+  },
+  "tool_use_missing": 1,
+  "tool_use_yes_non_missing_rate": 0.75,
+  "tool_use_no_non_missing_rate": 0.25,
+  "score_count": 4,
+  "score_mean": 8.0,
+  "score_median": 8.0,
+  "score_min": 6.0,
+  "score_max": 10.0,
+  "score_sample_standard_deviation": 1.632993161855452,
+  "year_by_tool_pairwise_complete_counts": {
+    "Year 1|Yes": 2,
+    "Year 1|No": 0,
+    "Year 2|Yes": 0,
+    "Year 2|No": 1,
+    "Year 3|Yes": 1,
+    "Year 3|No": 0
+  }
+}
