@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import tempfile
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -35,6 +36,7 @@ from visuaslide.preparation import (
     prepare_datetime_column,
     prepare_numeric_column,
 )
+from visuaslide.retry import RetryPolicy, call_with_retries
 from visuaslide.runs import RunManifest, RunStore
 from visuaslide.snapshots import SourceReader, SourceSnapshot, utc_now
 from visuaslide.storage import SnapshotStore
@@ -44,9 +46,18 @@ from visuaslide.validation import normalize_trailing_cells, validate_snapshot_st
 class SurveyRunner:
     """Acquire, snapshot, validate, prepare, and analyze without publishing."""
 
-    def __init__(self, config: ProjectConfig, source: SourceReader) -> None:
+    def __init__(
+        self,
+        config: ProjectConfig,
+        source: SourceReader,
+        *,
+        retry_policy: RetryPolicy | None = None,
+        sleep: Callable[[float], None] | None = None,
+    ) -> None:
         self.config = config
         self.source = source
+        self.retry_policy = retry_policy or RetryPolicy()
+        self.sleep = sleep
         self.snapshots = SnapshotStore(config.project_dir)
         self.datasets = DatasetStore(config.project_dir / "datasets")
         self.runs = RunStore(config.project_dir)
@@ -60,7 +71,11 @@ class SurveyRunner:
         manifest = self.runs.create(self.config)
         try:
             manifest = self._update(manifest, stage="acquiring")
-            snapshot = self.source.read(self.config.source)
+            snapshot = call_with_retries(
+                lambda: self.source.read(self.config.source),
+                policy=self.retry_policy,
+                **({"sleep": self.sleep} if self.sleep is not None else {}),
+            )
             stored = self.snapshots.save(snapshot)
             manifest = self._update(
                 manifest,

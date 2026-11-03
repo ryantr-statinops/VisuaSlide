@@ -3,8 +3,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from visuaslide import AnalysisResult, RunResult, SurveyProject, ValidationReport
+from visuaslide.exceptions import TransientAdapterError
 from visuaslide.models import RunStatus
 from visuaslide.publisher import FakeReportPublisher
+from visuaslide.retry import RetryPolicy
 from visuaslide.snapshots import SourceSnapshot
 from visuaslide.testing import FixtureSource
 
@@ -59,3 +61,28 @@ def test_public_sdk_supports_dry_run_publish_replay_and_run_inspection(tmp_path)
     assert published.snapshot_id is not None
     assert isinstance(project.validate(published.snapshot_id), ValidationReport)
     assert project.analyze(published.snapshot_id).tables == published.analysis.tables
+
+
+def test_sdk_retries_transient_publisher_failure_but_keeps_one_output_set(tmp_path) -> None:
+    project, fake_publisher = _project(tmp_path)
+    attempts = 0
+    delays = []
+
+    class FlakyPublisher:
+        def publish(self, content):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise TransientAdapterError("temporary publisher outage")
+            return fake_publisher.publish(content)
+
+    project.publisher = FlakyPublisher()
+    project.retry_policy = RetryPolicy(max_attempts=2, initial_backoff_seconds=0.05)
+    project.sleep = delays.append
+
+    result = project.refresh()
+
+    assert result.status == RunStatus.COMPLETED
+    assert attempts == 2
+    assert delays == [0.05]
+    assert len(fake_publisher.objects) == 17

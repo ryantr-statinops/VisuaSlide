@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
@@ -11,6 +12,7 @@ from visuaslide.exceptions import ConfigurationError, DataValidationError, Publi
 from visuaslide.models import AnalysisResult, RunResult, RunStatus, ValidationReport
 from visuaslide.pipeline import SurveyRunner
 from visuaslide.reporting import PresentationContent
+from visuaslide.retry import RetryPolicy, call_with_retries
 from visuaslide.runs import RunManifest, RunStore
 from visuaslide.snapshots import SourceReader
 
@@ -36,11 +38,20 @@ class SurveyProject:
         *,
         source: SourceReader | None = None,
         publisher: ReportPublisher | None = None,
+        retry_policy: RetryPolicy | None = None,
+        sleep: Callable[[float], None] | None = None,
     ) -> None:
         self.config = config
         self.source = source or _UnavailableSource()
         self.publisher = publisher
-        self._runner = SurveyRunner(config, self.source)
+        self.retry_policy = retry_policy or RetryPolicy()
+        self.sleep = sleep
+        self._runner = SurveyRunner(
+            config,
+            self.source,
+            retry_policy=self.retry_policy,
+            sleep=sleep,
+        )
         self._runs = RunStore(config.project_dir)
 
     @classmethod
@@ -50,9 +61,17 @@ class SurveyProject:
         *,
         source: SourceReader | None = None,
         publisher: ReportPublisher | None = None,
+        retry_policy: RetryPolicy | None = None,
+        sleep: Callable[[float], None] | None = None,
     ) -> SurveyProject:
         """Load a validated TOML project and inject local or Google adapters."""
-        return cls(load_config(path), source=source, publisher=publisher)
+        return cls(
+            load_config(path),
+            source=source,
+            publisher=publisher,
+            retry_policy=retry_policy,
+            sleep=sleep,
+        )
 
     def validate(self, snapshot_id: str) -> ValidationReport:
         """Validate a locally stored snapshot without source access."""
@@ -81,7 +100,11 @@ class SurveyProject:
 
         try:
             content = build_presentation_content(result.analysis, self.config.report)
-            self.publisher.publish(content)
+            call_with_retries(
+                lambda: self.publisher.publish(content),
+                policy=self.retry_policy,
+                **({"sleep": self.sleep} if self.sleep is not None else {}),
+            )
         except Exception as exc:
             self._update_manifest(
                 result.run_id,

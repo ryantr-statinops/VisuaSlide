@@ -5,10 +5,11 @@ from pathlib import Path
 import pytest
 
 from visuaslide.config import load_config
-from visuaslide.exceptions import ConfigurationError, LockUnavailableError
+from visuaslide.exceptions import ConfigurationError, LockUnavailableError, TransientAdapterError
 from visuaslide.locking import ProjectLock
 from visuaslide.models import RunStatus
 from visuaslide.pipeline import SurveyRunner
+from visuaslide.retry import RetryPolicy
 from visuaslide.runs import RunStore
 from visuaslide.snapshots import SourceSnapshot
 from visuaslide.testing import FixtureSource
@@ -128,3 +129,28 @@ def test_refresh_does_not_create_a_run_when_another_process_holds_project_lock(t
             runner.refresh()
 
     assert not list((tmp_path / "runs").glob("*.json"))
+
+
+def test_refresh_retries_transient_source_failure_with_bounded_delay(tmp_path) -> None:
+    runner = _runner(tmp_path)
+    fixture_source = runner.source
+    delays = []
+    attempts = 0
+
+    class FlakySource:
+        def read(self, source):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise TransientAdapterError("temporary transport issue")
+            return fixture_source.read(source)
+
+    runner.source = FlakySource()
+    runner.retry_policy = RetryPolicy(max_attempts=2, initial_backoff_seconds=0.1)
+    runner.sleep = delays.append
+
+    result = runner.refresh()
+
+    assert result.status == RunStatus.READY
+    assert attempts == 2
+    assert delays == [0.1]

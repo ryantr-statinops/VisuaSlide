@@ -23,3 +23,7 @@ class PublishingError(VisuaSlideError):
 
 class LockUnavailableError(VisuaSlideError):
     """Raised when another process is already operating on this project."""
+
+
+class TransientAdapterError(VisuaSlideError):
+    """Raised by an adapter when a temporary transport or service failure may recover."""
