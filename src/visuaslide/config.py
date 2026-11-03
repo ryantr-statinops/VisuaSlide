@@ -5,7 +5,7 @@ from __future__ import annotations
 import tomllib
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -116,12 +116,110 @@ class SurveySchema(StrictModel):
         return self
 
 
+class PercentageDenominator(StrEnum):
+    """Response population used to calculate a single-variable percentage."""
+
+    NON_MISSING = "non_missing"
+    ALL_RESPONSES = "all_responses"
+
+
+class PercentageBasis(StrEnum):
+    """Normalization basis for a crosstab percentage."""
+
+    ROW = "row"
+    COLUMN = "column"
+    ALL = "all"
+
+
+class FrequencyAnalysis(StrictModel):
+    """A frequency table for a configured variable."""
+
+    id: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    kind: Literal["frequency"]
+    variable: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    denominator: PercentageDenominator
+
+
+class NumericSummaryAnalysis(StrictModel):
+    """Descriptive statistics for one numeric variable."""
+
+    id: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    kind: Literal["numeric_summary"]
+    variable: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+
+
+class CrosstabAnalysis(StrictModel):
+    """A two-variable frequency table with an explicit normalization basis."""
+
+    id: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    kind: Literal["crosstab"]
+    row_variable: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    column_variable: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    percentage_basis: PercentageBasis
+
+    @model_validator(mode="after")
+    def require_distinct_variables(self) -> CrosstabAnalysis:
+        if self.row_variable == self.column_variable:
+            raise ValueError("crosstab variables must be different")
+        return self
+
+
+AnalysisSpecification = Annotated[
+    FrequencyAnalysis | NumericSummaryAnalysis | CrosstabAnalysis,
+    Field(discriminator="kind"),
+]
+
+
+class AnalysisConfig(StrictModel):
+    """Ordered analysis requests configured for the survey."""
+
+    specifications: tuple[AnalysisSpecification, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def check_unique_ids(self) -> AnalysisConfig:
+        ids = [specification.id for specification in self.specifications]
+        if len(ids) != len(set(ids)):
+            raise ValueError("analysis IDs must be unique")
+        return self
+
+
 class ProjectConfig(StrictModel):
     """Minimum project configuration required to identify a source."""
 
     source: SourceConfig
     survey_schema: SurveySchema = Field(alias="schema")
+    analysis: AnalysisConfig
     project_dir: Path = Path(".visuaslide")
+
+    @model_validator(mode="after")
+    def validate_analysis_references(self) -> ProjectConfig:
+        variables = {variable.name: variable for variable in self.survey_schema.variables}
+        for specification in self.analysis.specifications:
+            if isinstance(specification, FrequencyAnalysis):
+                variable = variables.get(specification.variable)
+                if variable is None or variable.kind != VariableKind.CATEGORICAL:
+                    raise ValueError(
+                        f"frequency analysis {specification.id!r} requires a categorical variable"
+                    )
+            elif isinstance(specification, NumericSummaryAnalysis):
+                variable = variables.get(specification.variable)
+                if variable is None or variable.kind != VariableKind.NUMERIC:
+                    raise ValueError(
+                        f"numeric summary {specification.id!r} requires a numeric variable"
+                    )
+            else:
+                row_variable = variables.get(specification.row_variable)
+                column_variable = variables.get(specification.column_variable)
+                if (
+                    row_variable is None
+                    or column_variable is None
+                    or row_variable.kind != VariableKind.CATEGORICAL
+                    or column_variable.kind != VariableKind.CATEGORICAL
+                ):
+                    raise ValueError(
+                        f"crosstab {specification.id!r} requires two categorical variables"
+                    )
+        return self
 
 
 def load_config(path: str | Path) -> ProjectConfig:

@@ -38,7 +38,10 @@ def test_load_config_resolves_relative_runtime_directory(tmp_path: Path) -> None
     config_file.write_text(
         'project_dir="runs"\n[source]\nspreadsheet_id="synthetic"\n'
         'sheet_id=0\ncolumn_range="A:D"\n'
-        '[schema]\nvariables=[{name="result", source_header="Result", kind="text"}]\n',
+        '[schema]\nvariables=[{name="result", source_header="Result", '
+        'kind="categorical", categories=["pass", "fail"]}]\n'
+        '[analysis]\nspecifications=[{id="result_frequency", kind="frequency", '
+        'variable="result", denominator="non_missing"}]\n',
         encoding="utf-8",
     )
 
