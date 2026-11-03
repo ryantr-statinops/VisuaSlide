@@ -19,7 +19,7 @@ def test_synthetic_survey_fixture_matches_independently_computed_reference() -> 
     assert [row[1] for row in rows].count("Year 3") == expected["study_year_counts"]["Year 3"]
     assert [row[1] for row in rows].count("Year 4") == expected["study_year_counts"]["Year 4"]
 
-    scores = [float(row[3]) for row in rows if row[3] != ""]
+    scores = [float(row[3]) for row in rows if row[3] not in ("", None)]
     assert len(scores) == expected["score_count"]
     assert sum(scores) / len(scores) == expected["score_mean"]
     assert sorted(scores)[1:3] == [expected["score_median"], expected["score_median"]]
