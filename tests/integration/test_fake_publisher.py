@@ -1,6 +1,6 @@
 import pytest
 
-from visuaslide.exceptions import PublishingError
+from visuaslide.exceptions import OutputReconciliationError, PublishingError
 from visuaslide.publisher import FakeReportPublisher
 from visuaslide.reporting import (
     ChartSeries,
@@ -9,6 +9,7 @@ from visuaslide.reporting import (
     ReportTable,
     ReportText,
 )
+from visuaslide.update_plan import plan_report_update
 
 
 def _content(value: int, title: str = "Survey") -> PresentationContent:
@@ -71,3 +72,16 @@ def test_fake_publisher_rejects_layout_overflow_before_mutating_output() -> None
 
     assert publisher.objects == existing_state
     assert publisher.mapping == existing_mapping
+
+
+def test_fake_publisher_stops_when_create_identity_has_different_payload() -> None:
+    publisher = FakeReportPublisher()
+    content = _content(3)
+    plan = plan_report_update(content)
+    operation = plan.operations[0]
+    publisher._slide_objects[operation.object_id] = {"text": "unrecognized content"}
+
+    with pytest.raises(OutputReconciliationError, match="cannot be reconciled safely"):
+        publisher.publish_step("slides", content, plan)
+
+    assert publisher.objects[operation.object_id] == {"text": "unrecognized content"}

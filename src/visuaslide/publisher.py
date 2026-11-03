@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from visuaslide.exceptions import PublishingError
+from visuaslide.exceptions import OutputReconciliationError, PublishingError
 from visuaslide.layouts import PresentationLayout, build_default_layout
 from visuaslide.reporting import PresentationContent
 from visuaslide.update_plan import ManagedObjectMap, ReportUpdatePlan, plan_report_update
@@ -84,7 +84,10 @@ class FakeReportPublisher:
             exists = operation.object_id in next_objects
             if operation.action == "create":
                 if exists and next_objects[operation.object_id] != operation.payload:
-                    raise PublishingError("A new managed object ID already exists in the output.")
+                    raise OutputReconciliationError(
+                        "A managed object ID exists with different content; "
+                        "the creation result cannot be reconciled safely."
+                    )
                 next_objects[operation.object_id] = operation.payload.copy()
             elif operation.action == "update":
                 if not exists:

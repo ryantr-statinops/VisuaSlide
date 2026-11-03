@@ -21,6 +21,10 @@ class PublishingError(VisuaSlideError):
     """Raised when a report cannot be safely published."""
 
 
+class OutputReconciliationError(PublishingError):
+    """Raised when a managed output identity cannot be reconciled safely."""
+
+
 class LockUnavailableError(VisuaSlideError):
     """Raised when another process is already operating on this project."""
 

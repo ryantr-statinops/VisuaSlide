@@ -192,3 +192,29 @@ def test_sdk_resume_rejects_a_changed_effective_configuration(tmp_path) -> None:
 
     with pytest.raises(ConfigurationError, match="effective configuration"):
         changed_project.resume(run_id)
+
+
+def test_sdk_reconciles_create_that_succeeded_before_timeout(tmp_path) -> None:
+    project, _ = _project(tmp_path)
+
+    class TimesOutAfterFirstCreate(FakeReportPublisher):
+        did_timeout = False
+
+        def publish_step(self, step, content, plan):
+            super().publish_step(step, content, plan)
+            if step == "workbook" and not self.did_timeout:
+                self.did_timeout = True
+                raise TimeoutError("response timed out after create")
+
+    publisher = TimesOutAfterFirstCreate()
+    project.publisher = publisher
+    project.retry_policy = RetryPolicy(max_attempts=2, initial_backoff_seconds=0)
+    project.sleep = lambda _: None
+
+    result = project.refresh()
+
+    assert result.status == RunStatus.COMPLETED
+    assert publisher.did_timeout
+    assert len(publisher.workbook_objects) == 7
+    assert len(publisher.objects) == 17
+    assert len({entry.object_id for entry in publisher.mapping.entries}) == 17
