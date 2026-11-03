@@ -6,8 +6,10 @@ import duckdb
 import pandas as pd
 
 from visuaslide.config import (
+    CrosstabAnalysis,
     FrequencyAnalysis,
     NumericSummaryAnalysis,
+    PercentageBasis,
     PercentageDenominator,
     VariableKind,
     VariableSchema,
@@ -100,6 +102,90 @@ def calculate_numeric_summary(
                 numeric_count,
             ),
         ),
+    )
+
+
+def calculate_crosstab(
+    frame: pd.DataFrame,
+    row_variable: VariableSchema,
+    column_variable: VariableSchema,
+    specification: CrosstabAnalysis,
+) -> AnalysisTable:
+    """Calculate a configured crosstab over complete, nonmissing category pairs."""
+    if (
+        specification.row_variable != row_variable.name
+        or specification.column_variable != column_variable.name
+        or row_variable.kind != VariableKind.CATEGORICAL
+        or column_variable.kind != VariableKind.CATEGORICAL
+    ):
+        raise ValueError("crosstab specification and variables do not match")
+    if row_variable.name not in frame.columns or column_variable.name not in frame.columns:
+        raise DataValidationError("Crosstab input is missing a prepared variable.")
+
+    row_identifier = _quote_identifier(row_variable.name)
+    column_identifier = _quote_identifier(column_variable.name)
+    connection = duckdb.connect(database=":memory:")
+    try:
+        connection.register("survey_data", frame)
+        counts = {
+            (row_category, column_category): int(count)
+            for row_category, column_category, count in connection.execute(
+                "SELECT "
+                f"{row_identifier}, {column_identifier}, COUNT(*) "
+                "FROM survey_data "
+                f"WHERE {row_identifier} IS NOT NULL AND {column_identifier} IS NOT NULL "
+                f"GROUP BY {row_identifier}, {column_identifier}"
+            ).fetchall()
+        }
+    finally:
+        connection.close()
+
+    row_totals = {
+        row_category: sum(
+            int(counts.get((row_category, column_category), 0))
+            for column_category in column_variable.categories
+        )
+        for row_category in row_variable.categories
+    }
+    column_totals = {
+        column_category: sum(
+            int(counts.get((row_category, column_category), 0))
+            for row_category in row_variable.categories
+        )
+        for column_category in column_variable.categories
+    }
+    total = sum(row_totals.values())
+
+    result_rows = []
+    for row_category in row_variable.categories:
+        for column_category in column_variable.categories:
+            count = int(counts.get((row_category, column_category), 0))
+            denominator = {
+                PercentageBasis.ROW: row_totals[row_category],
+                PercentageBasis.COLUMN: column_totals[column_category],
+                PercentageBasis.ALL: total,
+            }[specification.percentage_basis]
+            result_rows.append(
+                (
+                    row_category,
+                    column_category,
+                    count,
+                    count,
+                    denominator,
+                    count / denominator if denominator else None,
+                )
+            )
+    return AnalysisTable(
+        analysis_id=specification.id,
+        columns=(
+            "row_category",
+            "column_category",
+            "frequency",
+            "numerator",
+            "denominator",
+            "percentage",
+        ),
+        rows=tuple(result_rows),
     )
 
 
