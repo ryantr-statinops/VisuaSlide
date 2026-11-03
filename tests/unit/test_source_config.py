@@ -37,7 +37,8 @@ def test_load_config_resolves_relative_runtime_directory(tmp_path: Path) -> None
     config_file = tmp_path / "survey.toml"
     config_file.write_text(
         'project_dir="runs"\n[source]\nspreadsheet_id="synthetic"\n'
-        'sheet_id=0\ncolumn_range="A:D"\n',
+        'sheet_id=0\ncolumn_range="A:D"\n'
+        '[schema]\nvariables=[{name="result", source_header="Result", kind="text"}]\n',
         encoding="utf-8",
     )
 
