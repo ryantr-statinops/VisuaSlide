@@ -5,7 +5,8 @@ from pathlib import Path
 import pytest
 
 from visuaslide.config import load_config
-from visuaslide.exceptions import ConfigurationError
+from visuaslide.exceptions import ConfigurationError, LockUnavailableError
+from visuaslide.locking import ProjectLock
 from visuaslide.models import RunStatus
 from visuaslide.pipeline import SurveyRunner
 from visuaslide.runs import RunStore
@@ -117,3 +118,13 @@ def test_snapshot_replay_rejects_a_changed_effective_configuration(tmp_path) -> 
 
     with pytest.raises(ConfigurationError, match="configuration recorded"):
         changed_runner.analyze_snapshot(original.snapshot_id)
+
+
+def test_refresh_does_not_create_a_run_when_another_process_holds_project_lock(tmp_path) -> None:
+    runner = _runner(tmp_path)
+
+    with ProjectLock(tmp_path):
+        with pytest.raises(LockUnavailableError, match="already refreshing"):
+            runner.refresh()
+
+    assert not list((tmp_path / "runs").glob("*.json"))

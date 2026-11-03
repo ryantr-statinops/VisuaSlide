@@ -21,6 +21,7 @@ from visuaslide.config import (
 )
 from visuaslide.datasets import DatasetStore
 from visuaslide.exceptions import ConfigurationError, StorageError, VisuaSlideError
+from visuaslide.locking import ProjectLock
 from visuaslide.models import (
     AnalysisResult,
     RunResult,
@@ -52,6 +53,10 @@ class SurveyRunner:
 
     def refresh(self) -> RunResult:
         """Read a complete source snapshot and produce a local analysis run."""
+        with ProjectLock(self.config.project_dir):
+            return self._refresh_locked()
+
+    def _refresh_locked(self) -> RunResult:
         manifest = self.runs.create(self.config)
         try:
             manifest = self._update(manifest, stage="acquiring")
