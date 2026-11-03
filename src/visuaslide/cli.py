@@ -9,7 +9,11 @@ from typing import Annotated
 import typer
 
 from visuaslide import SurveyProject
-from visuaslide.exceptions import VisuaSlideError
+from visuaslide.config import load_config
+from visuaslide.exceptions import ConfigurationError, VisuaSlideError
+from visuaslide.publisher import FakeReportPublisher
+from visuaslide.snapshots import SourceSnapshot, utc_now
+from visuaslide.testing import FixtureSource
 
 app = typer.Typer(
     name="visuaslide",
@@ -61,6 +65,45 @@ def inspect_run_command(
     except VisuaSlideError as exc:
         _fail(exc)
     _print_json(result.model_dump(mode="json"))
+
+
+@app.command("refresh")
+def refresh_command(
+    config: Annotated[Path, typer.Option("--config", exists=True, readable=True)],
+    dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
+    fixture_json: Annotated[Path | None, typer.Option("--fixture-json", readable=True)] = None,
+) -> None:
+    """Refresh from an explicit offline fixture and optionally publish to a fake output."""
+    if fixture_json is None:
+        _fail(
+            ConfigurationError(
+                "A fixture JSON is required for offline refresh; "
+                "Google source support is not available yet."
+            )
+        )
+    try:
+        project_config = load_config(config)
+        fixture = json.loads(fixture_json.read_text(encoding="utf-8"))
+        snapshot = SourceSnapshot.capture(
+            project_config.source,
+            headers=tuple(fixture["headers"]),
+            rows=tuple(tuple(row) for row in fixture["rows"]),
+            acquired_at=utc_now(),
+        )
+        publisher = None if dry_run else FakeReportPublisher()
+        project = SurveyProject(
+            project_config,
+            source=FixtureSource(snapshot),
+            publisher=publisher,
+        )
+        result = project.refresh(dry_run=dry_run)
+    except VisuaSlideError as exc:
+        _fail(exc)
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+        _fail(ConfigurationError("The offline fixture JSON could not be loaded."))
+    _print_json(result.model_dump(mode="json"))
+    if result.status.value in {"validation_failed", "failed"}:
+        raise typer.Exit(code=1)
 
 
 def _project(path: Path) -> SurveyProject:

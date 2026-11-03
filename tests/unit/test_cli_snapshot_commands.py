@@ -84,3 +84,41 @@ def test_cli_reports_validation_failure_with_nonzero_exit_and_safe_json(tmp_path
     payload = json.loads(result.output)
     assert payload["is_valid"] is False
     assert "private unexpected value" not in result.output
+
+
+def test_cli_refresh_supports_fixture_dry_run_and_fake_publish(tmp_path) -> None:
+    config_path, _, _ = _project_files(tmp_path)
+    fixture_path = ROOT / "tests/fixtures/synthetic_responses.json"
+    runner = CliRunner()
+
+    dry_run = runner.invoke(
+        app,
+        [
+            "refresh",
+            "--config",
+            str(config_path),
+            "--fixture-json",
+            str(fixture_path),
+            "--dry-run",
+        ],
+    )
+    published = runner.invoke(
+        app,
+        ["refresh", "--config", str(config_path), "--fixture-json", str(fixture_path)],
+    )
+
+    assert dry_run.exit_code == 0, dry_run.output
+    assert json.loads(dry_run.output)["stage"] == "dry_run_complete"
+    assert json.loads(dry_run.output)["status"] == "ready"
+    assert published.exit_code == 0, published.output
+    assert json.loads(published.output)["stage"] == "published"
+    assert json.loads(published.output)["status"] == "completed"
+
+
+def test_cli_refresh_requires_explicit_fixture_until_google_adapter_exists(tmp_path) -> None:
+    config_path, _, _ = _project_files(tmp_path)
+
+    result = CliRunner().invoke(app, ["refresh", "--config", str(config_path)])
+
+    assert result.exit_code == 2
+    assert "fixture JSON is required" in result.output
