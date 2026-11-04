@@ -10,7 +10,11 @@ from googleapiclient.discovery import build
 from visuaslide.config import ProjectConfig
 from visuaslide.exceptions import PublishingError
 from visuaslide.google_auth import GoogleCredentialStore
-from visuaslide.google_outputs import ManagedOutputStore, verify_managed_output
+from visuaslide.google_outputs import (
+    ManagedOutputStore,
+    verify_configured_output_ids,
+    verify_managed_output,
+)
 
 
 def download_review_thumbnails(config: ProjectConfig) -> tuple[Path, ...]:
@@ -19,6 +23,7 @@ def download_review_thumbnails(config: ProjectConfig) -> tuple[Path, ...]:
     drive = build("drive", "v3", credentials=credentials, cache_discovery=False)
     slides = build("slides", "v1", credentials=credentials, cache_discovery=False)
     registry = ManagedOutputStore(config.project_dir).load_or_create()
+    verify_configured_output_ids(config, registry)
     deck_id = registry.files.get("presentation")
     if deck_id is None:
         raise PublishingError("Bootstrap the managed presentation before layout review.")

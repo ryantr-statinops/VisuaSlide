@@ -6,7 +6,7 @@ from googleapiclient.discovery import build
 
 from visuaslide.config import ProjectConfig
 from visuaslide.google_auth import GoogleCredentialStore
-from visuaslide.google_outputs import GoogleOutputManager
+from visuaslide.google_outputs import GoogleOutputManager, verify_configured_output_ids
 from visuaslide.google_template import GoogleSlidesTemplate
 from visuaslide.layouts import PresentationLayout, SlideLayout
 
@@ -63,6 +63,7 @@ class GoogleBootstrapper:
         outputs = GoogleOutputManager(
             drive, self.config.project_dir, self.config.source.spreadsheet_id
         )
+        verify_configured_output_ids(self.config, outputs.store.load_or_create())
         workbook_id = outputs.bootstrap_workbook()
         template_id = GoogleSlidesTemplate(slides, outputs).bootstrap(
             project_template_layout(self.config)

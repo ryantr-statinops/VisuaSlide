@@ -10,7 +10,11 @@ from googleapiclient.discovery import build
 from visuaslide.config import ProjectConfig
 from visuaslide.exceptions import PublishingError
 from visuaslide.google_auth import GoogleCredentialStore
-from visuaslide.google_outputs import ManagedOutputStore, verify_managed_output
+from visuaslide.google_outputs import (
+    ManagedOutputStore,
+    verify_configured_output_ids,
+    verify_managed_output,
+)
 from visuaslide.google_template import template_object_id
 from visuaslide.layouts import build_default_layout
 from visuaslide.reporting import PresentationContent, ReportChart, ReportTable
@@ -30,7 +34,9 @@ class GoogleReportPublisher:
         self.drive = drive
         self.slides = slides
         self.store = ManagedOutputStore(config.project_dir)
-        self._mapping = self.store.load_or_create().mapping
+        registry = self.store.load_or_create()
+        verify_configured_output_ids(config, registry)
+        self._mapping = registry.mapping
 
     @classmethod
     def from_config(cls, config: ProjectConfig) -> GoogleReportPublisher:

@@ -1,11 +1,14 @@
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
 
+from visuaslide.config import load_config
 from visuaslide.exceptions import PublishingError
 from visuaslide.google_outputs import (
     GoogleOutputManager,
     ManagedOutputStore,
+    verify_configured_output_ids,
     verify_managed_output,
 )
 
@@ -22,6 +25,16 @@ def test_registry_project_identity_survives_a_new_process(tmp_path) -> None:
     second = ManagedOutputStore(tmp_path).load_or_create()
     assert second.project_id == first.project_id
     assert second.files == {}
+
+
+def test_configured_output_id_must_match_managed_registry(tmp_path) -> None:
+    config = load_config(Path(__file__).parents[2] / "examples/survey.example.toml")
+    config = config.model_copy(
+        update={"output": config.output.model_copy(update={"reporting_spreadsheet_id": "other"})}
+    )
+    registry = ManagedOutputStore(tmp_path).load_or_create()
+    with pytest.raises(PublishingError, match="does not match"):
+        verify_configured_output_ids(config, registry)
 
 
 def test_output_verification_requires_correct_marker_and_file_type() -> None:

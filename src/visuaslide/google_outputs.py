@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 from pydantic import Field
 
-from visuaslide.config import StrictModel
+from visuaslide.config import ProjectConfig, StrictModel
 from visuaslide.exceptions import PublishingError, StorageError
 from visuaslide.locking import ProjectLock
 from visuaslide.update_plan import ManagedObjectMap
@@ -61,6 +61,20 @@ class ManagedOutputStore:
         finally:
             if temporary_path is not None:
                 temporary_path.unlink(missing_ok=True)
+
+
+def verify_configured_output_ids(config: ProjectConfig, registry: ManagedOutputRegistry) -> None:
+    """Do not silently ignore output IDs named by the user in TOML."""
+    configured = {
+        "workbook": config.output.reporting_spreadsheet_id,
+        "template": config.output.template_presentation_id,
+        "presentation": config.output.presentation_id,
+    }
+    for role, file_id in configured.items():
+        if file_id is not None and registry.files.get(role) != file_id:
+            raise PublishingError(
+                "A configured Google output ID does not match the local managed registry."
+            )
 
 
 def verify_managed_output(
