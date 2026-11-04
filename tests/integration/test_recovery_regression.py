@@ -86,6 +86,39 @@ def test_refresh_reconciles_added_updated_and_deleted_responses(tmp_path) -> Non
     assert project.analyze(original_snapshot_id).tables == original_analysis.tables
 
 
+def test_invalid_source_blocks_publish_then_corrected_source_completes(tmp_path) -> None:
+    project, publisher, original_snapshot = _project(tmp_path)
+    bad_rows = list(original_snapshot.rows)
+    bad_rows[0] = (bad_rows[0][0], "Unknown year", *bad_rows[0][2:])
+    invalid_snapshot = SourceSnapshot.capture(
+        project.config.source,
+        headers=original_snapshot.headers,
+        rows=tuple(bad_rows),
+        acquired_at=datetime(2026, 11, 4, tzinfo=UTC),
+    )
+    project.source = FixtureSource(invalid_snapshot)
+    project._runner.source = project.source
+
+    invalid = project.refresh()
+
+    assert invalid.status == RunStatus.VALIDATION_FAILED
+    assert invalid.snapshot_id is not None
+    assert (tmp_path / "runtime" / "snapshots" / f"{invalid.snapshot_id}.json").is_file()
+    assert not list((tmp_path / "runtime" / "datasets").glob("*.parquet"))
+    assert publisher.objects == {}
+    assert publisher.workbook_objects == {}
+
+    project.source = FixtureSource(original_snapshot)
+    project._runner.source = project.source
+    corrected = project.refresh()
+
+    assert corrected.status == RunStatus.COMPLETED
+    assert corrected.analysis is not None
+    assert corrected.analysis.accepted_rows == 5
+    assert corrected.snapshot_id != invalid.snapshot_id
+    assert len(publisher.objects) == 17
+
+
 @pytest.mark.parametrize("failed_step", ["workbook", "charts", "slides"])
 @pytest.mark.parametrize("failure_timing", ["before", "after"])
 def test_resume_recovers_before_and_after_each_publish_checkpoint(
