@@ -3,7 +3,11 @@ from unittest.mock import Mock
 import pytest
 
 from visuaslide.exceptions import PublishingError
-from visuaslide.google_outputs import ManagedOutputStore, verify_managed_output
+from visuaslide.google_outputs import (
+    GoogleOutputManager,
+    ManagedOutputStore,
+    verify_managed_output,
+)
 
 
 def _drive(file):
@@ -54,3 +58,40 @@ def test_output_verification_rejects_source_before_drive_read() -> None:
             source_spreadsheet_id="source-id",
         )
     drive.files.assert_not_called()
+
+
+def test_workbook_bootstrap_creates_once_and_reuses_verified_identity(tmp_path) -> None:
+    drive = Mock()
+    manager = GoogleOutputManager(drive, tmp_path, "source-id")
+    project_id = manager.store.load_or_create().project_id
+    drive.files.return_value.list.return_value.execute.return_value = {"files": []}
+    drive.files.return_value.create.return_value.execute.return_value = {"id": "workbook-id"}
+    drive.files.return_value.get.return_value.execute.return_value = {
+        "id": "workbook-id",
+        "mimeType": "application/vnd.google-apps.spreadsheet",
+        "appProperties": {"visuaslide_project": project_id, "visuaslide_role": "workbook"},
+    }
+
+    assert manager.bootstrap_workbook() == "workbook-id"
+    assert manager.bootstrap_workbook() == "workbook-id"
+    assert manager.store.load_or_create().files["workbook"] == "workbook-id"
+    drive.files.return_value.create.assert_called_once()
+
+
+def test_workbook_timeout_reconciles_one_marked_file(tmp_path) -> None:
+    drive = Mock()
+    manager = GoogleOutputManager(drive, tmp_path, "source-id")
+    project_id = manager.store.load_or_create().project_id
+    drive.files.return_value.list.return_value.execute.side_effect = [
+        {"files": []},
+        {"files": [{"id": "workbook-id"}]},
+    ]
+    drive.files.return_value.create.return_value.execute.side_effect = TimeoutError("private")
+    drive.files.return_value.get.return_value.execute.return_value = {
+        "id": "workbook-id",
+        "mimeType": "application/vnd.google-apps.spreadsheet",
+        "appProperties": {"visuaslide_project": project_id, "visuaslide_role": "workbook"},
+    }
+
+    assert manager.bootstrap_workbook() == "workbook-id"
+    assert manager.store.load_or_create().files["workbook"] == "workbook-id"

@@ -12,6 +12,7 @@ from pydantic import Field
 
 from visuaslide.config import StrictModel
 from visuaslide.exceptions import PublishingError, StorageError
+from visuaslide.locking import ProjectLock
 
 OutputRole = Literal["workbook", "template", "presentation"]
 MIME_TYPES = {
@@ -88,3 +89,84 @@ def verify_managed_output(
         or properties.get("visuaslide_role") != role
     ):
         raise PublishingError("Google output identity or management marker does not match.")
+
+
+class GoogleOutputManager:
+    """Create and reconcile managed Drive files without duplicating uncertain creates."""
+
+    def __init__(self, drive_service: Any, project_dir: Path, source_spreadsheet_id: str) -> None:
+        self.drive = drive_service
+        self.project_dir = Path(project_dir)
+        self.source_spreadsheet_id = source_spreadsheet_id
+        self.store = ManagedOutputStore(project_dir)
+
+    def bootstrap_workbook(self) -> str:
+        """Return the app-managed reporting workbook, creating it once if needed."""
+        with ProjectLock(self.project_dir):
+            registry = self.store.load_or_create()
+            existing = registry.files.get("workbook")
+            if existing:
+                self._verify(existing, "workbook", registry.project_id)
+                return existing
+
+            found = self._find_marked("workbook", registry.project_id)
+            if found is None:
+                properties = {
+                    "visuaslide_project": registry.project_id,
+                    "visuaslide_role": "workbook",
+                }
+                try:
+                    response = (
+                        self.drive.files()
+                        .create(
+                            body={
+                                "name": "VisuaSlide reporting workbook",
+                                "mimeType": MIME_TYPES["workbook"],
+                                "appProperties": properties,
+                            },
+                            fields="id",
+                        )
+                        .execute()
+                    )
+                    found = response.get("id")
+                except Exception as exc:
+                    found = self._find_marked("workbook", registry.project_id)
+                    if found is None:
+                        raise PublishingError(
+                            "Workbook creation result is uncertain; "
+                            "no managed file could be reconciled."
+                        ) from exc
+            if found is None:
+                raise PublishingError("Workbook creation returned no managed file ID.")
+            self._verify(found, "workbook", registry.project_id)
+            updated_files = {**registry.files, "workbook": found}
+            self.store.save(registry.model_copy(update={"files": updated_files}))
+            return found
+
+    def _verify(self, file_id: str, role: OutputRole, project_id: str) -> None:
+        verify_managed_output(
+            self.drive,
+            file_id=file_id,
+            role=role,
+            project_id=project_id,
+            source_spreadsheet_id=self.source_spreadsheet_id,
+        )
+
+    def _find_marked(self, role: OutputRole, project_id: str) -> str | None:
+        query = (
+            f"appProperties has {{ key='visuaslide_project' and value='{project_id}' }} "
+            f"and appProperties has {{ key='visuaslide_role' and value='{role}' }} "
+            "and trashed = false"
+        )
+        try:
+            result = (
+                self.drive.files()
+                .list(q=query, fields="nextPageToken,files(id,mimeType,appProperties)", pageSize=2)
+                .execute()
+            )
+        except Exception as exc:
+            raise PublishingError("Could not reconcile managed Google output creation.") from exc
+        files = result.get("files", [])
+        if len(files) > 1 or result.get("nextPageToken"):
+            raise PublishingError("Multiple managed Google outputs match one project role.")
+        return files[0]["id"] if files else None
