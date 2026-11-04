@@ -21,6 +21,7 @@ class SourceMetadata(StrictModel):
     locale: str | None = None
     timezone: str | None = None
     value_render_option: str
+    date_time_render_option: str | None = None
 
 
 class SourceSnapshot(StrictModel):
@@ -48,6 +49,7 @@ class SourceSnapshot(StrictModel):
         rows: tuple[tuple[Scalar, ...], ...],
         acquired_at: datetime,
         value_render_option: str = "UNFORMATTED_VALUE",
+        date_time_render_option: str | None = None,
         locale: str | None = None,
         timezone: str | None = None,
     ) -> SourceSnapshot:
@@ -61,6 +63,7 @@ class SourceSnapshot(StrictModel):
                 locale=locale,
                 timezone=timezone,
                 value_render_option=value_render_option,
+                date_time_render_option=date_time_render_option,
             ),
             acquired_at=acquired_at,
             headers=headers,

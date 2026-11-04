@@ -5,8 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from googleapiclient.discovery import build
+
 from visuaslide.config import SourceConfig
 from visuaslide.exceptions import ConfigurationError
+from visuaslide.google_auth import GoogleCredentialStore
+from visuaslide.snapshots import SourceSnapshot, utc_now
 
 
 @dataclass(frozen=True)
@@ -49,3 +53,45 @@ class GoogleSheetSource:
                     timezone=metadata.get("properties", {}).get("timeZone"),
                 )
         raise ConfigurationError("The configured Google sheet ID does not exist in the source.")
+
+    def read(self, source: SourceConfig) -> SourceSnapshot:
+        """Read the entire configured range without exposing a write operation."""
+        tab = self.resolve_tab(source)
+        try:
+            response = (
+                self._service.spreadsheets()
+                .values()
+                .get(
+                    spreadsheetId=source.spreadsheet_id,
+                    range=tab.data_range(source),
+                    majorDimension="ROWS",
+                    valueRenderOption="UNFORMATTED_VALUE",
+                    dateTimeRenderOption="FORMATTED_STRING",
+                )
+                .execute()
+            )
+        except Exception as exc:
+            raise ConfigurationError("Could not read the configured Google Sheets range.") from exc
+        rows = response.get("values", [])
+        return SourceSnapshot.capture(
+            source,
+            headers=tuple(str(value) for value in rows[0]) if rows else (),
+            rows=tuple(tuple(row) for row in rows[1:]),
+            acquired_at=utc_now(),
+            value_render_option="UNFORMATTED_VALUE",
+            date_time_render_option="FORMATTED_STRING",
+            locale=tab.locale,
+            timezone=tab.timezone,
+        )
+
+
+class LazyGoogleSheetSource:
+    """Delay credential loading until a fresh source read is requested."""
+
+    def __init__(self, project_dir) -> None:
+        self._credential_store = GoogleCredentialStore(project_dir)
+
+    def read(self, source: SourceConfig) -> SourceSnapshot:
+        credentials = self._credential_store.load()
+        service = build("sheets", "v4", credentials=credentials, cache_discovery=False)
+        return GoogleSheetSource(service).read(source)

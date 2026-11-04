@@ -14,6 +14,7 @@ from visuaslide.exceptions import (
     PublishingError,
     StorageError,
 )
+from visuaslide.google_source import LazyGoogleSheetSource
 from visuaslide.layouts import build_default_layout
 from visuaslide.locking import ProjectLock
 from visuaslide.models import AnalysisResult, RunResult, RunStatus, ValidationReport
@@ -41,11 +42,6 @@ class ReportPublisher(Protocol):
         """Apply one workbook, chart, or Slides checkpoint."""
 
 
-class _UnavailableSource:
-    def read(self, source):
-        raise ConfigurationError("No source adapter is configured for this project.")
-
-
 class SurveyProject:
     """Public SDK facade for one TOML-configured survey project."""
 
@@ -59,7 +55,7 @@ class SurveyProject:
         sleep: Callable[[float], None] | None = None,
     ) -> None:
         self.config = config
-        self.source = source or _UnavailableSource()
+        self.source = source or LazyGoogleSheetSource(config.project_dir)
         self.publisher = publisher
         self.retry_policy = retry_policy or RetryPolicy()
         self.sleep = sleep
