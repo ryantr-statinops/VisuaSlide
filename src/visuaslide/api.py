@@ -155,7 +155,11 @@ class SurveyProject:
         """Delegate output creation to an adapter that supports bootstrapping."""
         bootstrap = getattr(self.publisher, "bootstrap_outputs", None)
         if bootstrap is None:
-            raise PublishingError("The configured publisher does not support output bootstrap.")
+            if self.publisher is not None:
+                raise PublishingError("The configured publisher does not support output bootstrap.")
+            from visuaslide.google_bootstrap import GoogleBootstrapper
+
+            return GoogleBootstrapper(self.config).bootstrap_outputs()
         return bootstrap()
 
     def resume(self, run_id: str) -> RunResult:

@@ -38,6 +38,18 @@ def auth_command(
     _print_json({"status": "authorized", "token_path": str(token_path)})
 
 
+@app.command("bootstrap-outputs")
+def bootstrap_outputs_command(
+    config: Annotated[Path, typer.Option("--config", exists=True, readable=True)],
+) -> None:
+    """Create or reuse the managed Google workbook, template, and presentation."""
+    try:
+        result = _project(config).bootstrap_outputs()
+    except VisuaSlideError as exc:
+        _fail(exc)
+    _print_json(result)
+
+
 @app.command("validate")
 def validate_command(
     config: Annotated[Path, typer.Option("--config", exists=True, readable=True)],

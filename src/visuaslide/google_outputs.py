@@ -104,7 +104,7 @@ class GoogleOutputManager:
         """Return the app-managed reporting workbook, creating it once if needed."""
         return self.bootstrap_file("workbook", "VisuaSlide reporting workbook")
 
-    def bootstrap_file(self, role: OutputRole, name: str) -> str:
+    def bootstrap_file(self, role: OutputRole, name: str, *, copy_from: str | None = None) -> str:
         """Return or create one marked file, reconciling an uncertain create."""
         with ProjectLock(self.project_dir):
             registry = self.store.load_or_create()
@@ -120,18 +120,15 @@ class GoogleOutputManager:
                     "visuaslide_role": role,
                 }
                 try:
-                    response = (
-                        self.drive.files()
-                        .create(
-                            body={
-                                "name": name,
-                                "mimeType": MIME_TYPES[role],
-                                "appProperties": properties,
-                            },
-                            fields="id",
+                    body = {"name": name, "mimeType": MIME_TYPES[role], "appProperties": properties}
+                    if copy_from:
+                        response = (
+                            self.drive.files()
+                            .copy(fileId=copy_from, body=body, fields="id")
+                            .execute()
                         )
-                        .execute()
-                    )
+                    else:
+                        response = self.drive.files().create(body=body, fields="id").execute()
                     found = response.get("id")
                 except Exception as exc:
                     found = self._find_marked(role, registry.project_id)
