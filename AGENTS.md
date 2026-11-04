@@ -4,7 +4,7 @@ VisuaSlide is a Python SDK and CLI for turning survey data from Google Sheets in
 
 ## Current state and authority
 
-The offline SDK, CLI, analysis engine, package, and CI workflow are implemented through Phase 4. Google adapter code exists through C52, but live Google sandbox and rendered slide acceptance have not run. Treat the Google integration as unverified until those gates pass.
+The offline SDK, CLI, analysis engine, package, and CI workflow are implemented through Phase 4. Google adapter and non-interactive refresh code exists through C53, but live Google sandbox and rendered slide acceptance have not run. Treat the Google integration and scheduling as unverified until those gates pass.
 
 - Read the root `README.md` when present and the files relevant to the task before changing them.
 - Check applicable instructions in directories you change. Apply explicitly invoked skills and their workflows within the user's authorized scope.

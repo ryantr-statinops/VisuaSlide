@@ -6,9 +6,9 @@ VisuaSlide is a Python SDK and CLI for turning one survey tab into reproducible 
 
 ## Project status
 
-**Offline pipeline and recovery implemented through Phase 4; Google adapter code implemented through C52.** The repository includes a Python 3.12 package, TOML schema, immutable snapshots, validation and preparation, Parquet storage, DuckDB descriptive analysis, offline SDK/CLI workflows, presentation content/layout planning, and a fake publisher. Local code now covers desktop OAuth, Sheets ingestion, managed workbook/Slides output, linked charts, and thumbnail review. Google sandbox acceptance and visual inspection have not run, so Phase 5 is not complete.
+**Offline pipeline and recovery implemented through Phase 4; Google adapter code implemented through C53.** The repository includes a Python 3.12 package, TOML schema, immutable snapshots, validation and preparation, Parquet storage, DuckDB descriptive analysis, offline SDK/CLI workflows, presentation content/layout planning, and a fake publisher. Local code now covers desktop OAuth, Sheets ingestion, managed workbook/Slides output, linked charts, thumbnail review, and non-interactive refresh preflight. Google sandbox acceptance and visual inspection have not run, so Phase 5 and Phase 6 are not complete.
 
-See [the offline workflow](docs/offline-workflow.md) for verified setup and run commands. All current examples and automated tests use synthetic data.
+See [the offline workflow](docs/offline-workflow.md) for verified setup and run commands, [Google sandbox setup](docs/google-setup-and-recovery.md) for opt-in live checks, [fork and consumer setup](docs/collaborating-and-consuming.md) for collaboration, and [local scheduling](docs/local-scheduling.md) after live acceptance. All current examples and automated tests use synthetic data.
 
 Documentation uses four status labels:
 
@@ -89,13 +89,13 @@ The offline stack is locked in `uv.lock` and verified on Windows with CPython 3.
 | CI | GitHub Actions | Run checks against synthetic data and mocked Google boundaries. |
 | Local scheduling | Windows Task Scheduler | Invoke the CLI after manual refresh is established. |
 
-pandas owns preparation, while DuckDB owns the defined aggregate calculations. Pydantic validates configuration and result models; dataset-level validation requires explicit rules. Dependency versions and supported platforms remain to be verified when tooling is introduced.
+pandas owns preparation, while DuckDB owns the defined aggregate calculations. Pydantic validates configuration and result models; dataset-level validation applies separate rules. The lockfile and local checks cover Windows with CPython 3.12; other platforms and Python versions are not verified.
 
 ## Input data and analysis
 
 The intended input is a rectangular table with one header row, one survey response per subsequent row, and one variable per column. The configured region should not contain merged cells or embedded section headings.
 
-A project configuration will specify source identity and range, header mappings, column types, valid categories, missing-value rules, date/locale interpretation, and any filtering or duplicate policy. Configuration examples and executable interfaces will be added with implementation.
+A project configuration specifies source identity and range, header mappings, column types, valid categories, missing-value rules, and date/timezone interpretation. The implemented example is [survey.example.toml](examples/survey.example.toml). V0.1 retains all nonblank responses, including identical rows; filtering and duplicate removal are not configured.
 
 Initial descriptive analysis covers:
 
@@ -130,9 +130,9 @@ Templates and generated presentations must remain separate. Manual edits inside 
 
 ## Google access and data handling
 
-Desktop OAuth is the accepted local authentication direction. Google integration will require a Google Cloud project, enabled Sheets/Slides/Drive APIs, and appropriate consent configuration. Exact scopes, template access, credential storage, and unattended token behavior are **Open** until verified in a sandbox. [Desktop OAuth guide](https://developers.google.com/identity/protocols/oauth2/native-app)
+Desktop OAuth is implemented locally. Google integration requires a Google Cloud project, enabled Sheets/Slides/Drive APIs, and appropriate consent configuration. The code requests `spreadsheets.readonly` and `drive.file`; scope sufficiency, template access, and unattended token behavior are **Open** until verified in a sandbox. [Desktop OAuth guide](https://developers.google.com/identity/protocols/oauth2/native-app)
 
-The initial approach will evaluate read access to the source and file-scoped write access for application-managed outputs. OAuth does not enforce a one-tab boundary; the SDK must enforce its configured source and write targets. Existing template IDs do not automatically establish file-scoped access. [Google Drive scopes](https://developers.google.com/workspace/drive/api/guides/api-specific-auth)
+The adapters use read access to the source and file-scoped write access for application-managed outputs. OAuth does not enforce a one-tab boundary; the SDK enforces its configured source and write targets. Existing template IDs do not automatically establish file-scoped access. [Google Drive scopes](https://developers.google.com/workspace/drive/api/guides/api-specific-auth)
 
 Credentials, tokens, real responses, private snapshots, and generated reports containing real data must stay out of Git. Repository examples and automated checks will use synthetic data. Logs must record diagnostics without response payloads or credentials.
 
@@ -142,12 +142,12 @@ Local scheduling depends on the machine and required environment being available
 
 - **Wave 1 — offline foundation and analysis:** implemented locally through C01–C22. The full snapshot-to-analysis suite uses synthetic fixtures and passed locally.
 - **Wave 2 — offline pipeline and reporting:** implemented locally through C38. SDK/CLI, fake publishing, locking, bounded retries, checkpoints, resume, idempotency, and failure recovery use synthetic data and adapters.
-- **Wave 3 — Google services and operation:** C39–C52 adapter code and opt-in acceptance checks are committed locally. Google sandbox and visual acceptance are pending; Phase 6 and local scheduling remain unimplemented.
+- **Wave 3 — Google services and operation:** C39–C53 adapter and scheduler-preflight code, plus opt-in acceptance checks, are committed locally. Google sandbox and visual acceptance are pending. Scheduling is documented but not enabled or live-verified.
 
 The planned live acceptance target remains: change a response in the source, run one refresh, and see the correct aggregate table, chart, and descriptive text update together. Repeating the refresh must not duplicate managed objects, and the source must remain unchanged. Offline regression tests cover these behaviors through fake adapters; the target has not yet been tested against Google.
 
 ## Working in this repository
 
-Read [AGENTS.md](AGENTS.md) before contributing. Install the locked environment with `uv sync --all-groups`; verified test and packaging commands are listed in [the offline workflow](docs/offline-workflow.md).
+Read [AGENTS.md](AGENTS.md) before contributing. Install the locked environment with `uv sync --all-groups`; verified test and packaging commands are listed in [the offline workflow](docs/offline-workflow.md). A fork only sees pushed commits; the current Google adapter commits remain local until live sandbox acceptance.
 
 Documentation changes should be checked for structure, relative links, consistent status labels, and a clean Git diff. Future implementation checks should cover independently calculated statistical fixtures, invalid inputs, source edits/deletions, repeated refreshes, write-target protection, and partial publishing failures. Live Google integration checks should use dedicated synthetic sandbox files and remain separate from default CI.
