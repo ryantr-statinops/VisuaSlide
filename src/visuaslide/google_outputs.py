@@ -102,26 +102,30 @@ class GoogleOutputManager:
 
     def bootstrap_workbook(self) -> str:
         """Return the app-managed reporting workbook, creating it once if needed."""
+        return self.bootstrap_file("workbook", "VisuaSlide reporting workbook")
+
+    def bootstrap_file(self, role: OutputRole, name: str) -> str:
+        """Return or create one marked file, reconciling an uncertain create."""
         with ProjectLock(self.project_dir):
             registry = self.store.load_or_create()
-            existing = registry.files.get("workbook")
+            existing = registry.files.get(role)
             if existing:
-                self._verify(existing, "workbook", registry.project_id)
+                self._verify(existing, role, registry.project_id)
                 return existing
 
-            found = self._find_marked("workbook", registry.project_id)
+            found = self._find_marked(role, registry.project_id)
             if found is None:
                 properties = {
                     "visuaslide_project": registry.project_id,
-                    "visuaslide_role": "workbook",
+                    "visuaslide_role": role,
                 }
                 try:
                     response = (
                         self.drive.files()
                         .create(
                             body={
-                                "name": "VisuaSlide reporting workbook",
-                                "mimeType": MIME_TYPES["workbook"],
+                                "name": name,
+                                "mimeType": MIME_TYPES[role],
                                 "appProperties": properties,
                             },
                             fields="id",
@@ -130,16 +134,16 @@ class GoogleOutputManager:
                     )
                     found = response.get("id")
                 except Exception as exc:
-                    found = self._find_marked("workbook", registry.project_id)
+                    found = self._find_marked(role, registry.project_id)
                     if found is None:
                         raise PublishingError(
-                            "Workbook creation result is uncertain; "
+                            "Google output creation result is uncertain; "
                             "no managed file could be reconciled."
                         ) from exc
             if found is None:
-                raise PublishingError("Workbook creation returned no managed file ID.")
-            self._verify(found, "workbook", registry.project_id)
-            updated_files = {**registry.files, "workbook": found}
+                raise PublishingError("Google output creation returned no managed file ID.")
+            self._verify(found, role, registry.project_id)
+            updated_files = {**registry.files, role: found}
             self.store.save(registry.model_copy(update={"files": updated_files}))
             return found
 
