@@ -12,6 +12,7 @@ from visuaslide import SurveyProject
 from visuaslide.config import load_config
 from visuaslide.exceptions import ConfigurationError, VisuaSlideError
 from visuaslide.google_auth import authorize_desktop
+from visuaslide.google_layout_review import download_review_thumbnails
 from visuaslide.publisher import FakeReportPublisher
 from visuaslide.snapshots import SourceSnapshot, utc_now
 from visuaslide.testing import FixtureSource
@@ -61,6 +62,18 @@ def resume_command(
     except VisuaSlideError as exc:
         _fail(exc)
     _print_json(result.model_dump(mode="json"))
+
+
+@app.command("review-layout")
+def review_layout_command(
+    config: Annotated[Path, typer.Option("--config", exists=True, readable=True)],
+) -> None:
+    """Download managed slide thumbnails into ignored local runtime storage."""
+    try:
+        paths = download_review_thumbnails(load_config(config))
+    except VisuaSlideError as exc:
+        _fail(exc)
+    _print_json({"thumbnails": [str(path) for path in paths]})
 
 
 @app.command("validate")

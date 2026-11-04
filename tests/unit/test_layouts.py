@@ -76,6 +76,18 @@ def test_default_layout_is_widescreen_and_preserves_vietnamese_content() -> None
         (_content(category_count=19), "table table_answers exceeds 18 rows"),
         (
             _content().model_copy(
+                update={
+                    "charts": (
+                        _content()
+                        .charts[0]
+                        .model_copy(update={"categories": ("Nhãn tiếng Việt rất dài " * 4,)}),
+                    )
+                }
+            ),
+            "overlong category label",
+        ),
+        (
+            _content().model_copy(
                 update={"text_blocks": (ReportText(object_id="long_text", text="x" * 2401),)}
             ),
             "text object long_text exceeds",
