@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from unittest.mock import patch
 
 import pytest
 
@@ -57,3 +58,23 @@ def test_snapshot_store_detects_modified_snapshot_bytes(tmp_path) -> None:
 def test_snapshot_store_rejects_path_traversal_ids(tmp_path) -> None:
     with pytest.raises(StorageError, match="lowercase SHA-256"):
         SnapshotStore(tmp_path).load("../outside")
+
+
+def test_snapshot_store_saves_on_windows_when_hard_links_are_unavailable(tmp_path) -> None:
+    store = SnapshotStore(tmp_path)
+    with patch("visuaslide.storage.os.link", side_effect=PermissionError("hard links disabled")):
+        stored = store.save(_snapshot())
+    assert store.load(stored.snapshot_id) == stored
+
+
+def test_snapshot_store_does_not_replace_existing_snapshot_on_rename_race(tmp_path) -> None:
+    store = SnapshotStore(tmp_path)
+    stored = store.save(_snapshot())
+    existing = tmp_path / "snapshots" / f"{stored.snapshot_id}.json"
+    original = existing.read_bytes()
+    with patch("visuaslide.storage.os.link", side_effect=PermissionError("hard links disabled")):
+        with patch("visuaslide.storage.os.rename", side_effect=FileExistsError):
+            from visuaslide.storage import _atomic_create
+
+            _atomic_create(existing, b"different")
+    assert existing.read_bytes() == original

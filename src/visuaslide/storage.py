@@ -79,6 +79,15 @@ def _atomic_create(target: Path, content: bytes) -> None:
             os.link(temporary_path, target)
         except FileExistsError:
             pass
+        except PermissionError:
+            if os.name != "nt":
+                raise
+            try:
+                # Windows rename refuses to replace an existing destination.
+                os.rename(temporary_path, target)
+                temporary_path = None
+            except FileExistsError:
+                pass
     finally:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)

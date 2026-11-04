@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 import pandas as pd
 import pytest
 
@@ -57,3 +59,11 @@ def test_dataset_store_rejects_unvalidated_or_inconsistent_frames(
 ) -> None:
     with pytest.raises(StorageError, match=message):
         DatasetStore(tmp_path).save(snapshot_id, frame, report)
+
+
+def test_dataset_store_saves_on_windows_without_hard_links(tmp_path) -> None:
+    frame = pd.DataFrame({"answer": pd.Series(["yes", "no"], dtype="string")})
+    store = DatasetStore(tmp_path)
+    with patch("visuaslide.datasets.os.link", side_effect=PermissionError("hard links disabled")):
+        stored = store.save(SNAPSHOT_ID, frame, _valid_report())
+    pd.testing.assert_frame_equal(store.load(stored.snapshot_id), frame)

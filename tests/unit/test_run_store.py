@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from unittest.mock import patch
 
 import pytest
 from pydantic import ValidationError
@@ -94,3 +95,10 @@ def test_run_store_rejects_noncanonical_ids_and_unknown_updates(tmp_path) -> Non
         store.load("../../run")
     with pytest.raises(StorageError, match="does not exist"):
         store.save(RunManifest.start(_config()))
+
+
+def test_run_store_creates_manifest_on_windows_without_hard_links(tmp_path) -> None:
+    store = RunStore(tmp_path)
+    with patch("visuaslide.runs.os.link", side_effect=PermissionError("hard links disabled")):
+        manifest = store.create(_config())
+    assert store.load(manifest.run_id) == manifest

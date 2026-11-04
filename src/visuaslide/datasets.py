@@ -67,8 +67,14 @@ class DatasetStore:
                 frame.to_parquet(temporary_path, index=False, engine="pyarrow")
                 with temporary_path.open("rb+") as file:
                     os.fsync(file.fileno())
-                os.link(temporary_path, target)
-                temporary_path = None
+                try:
+                    os.link(temporary_path, target)
+                except PermissionError:
+                    if os.name != "nt":
+                        raise
+                    # Windows rename does not replace an existing destination.
+                    os.rename(temporary_path, target)
+                    temporary_path = None
             finally:
                 if temporary_path is not None:
                     temporary_path.unlink(missing_ok=True)

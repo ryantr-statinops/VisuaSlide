@@ -133,7 +133,14 @@ def _atomic_write(path: Path, content: bytes, *, replace: bool) -> None:
             os.replace(temporary_path, path)
             temporary_path = None
         else:
-            os.link(temporary_path, path)
+            try:
+                os.link(temporary_path, path)
+            except PermissionError:
+                if os.name != "nt":
+                    raise
+                # Windows rename refuses to replace an existing destination.
+                os.rename(temporary_path, path)
+                temporary_path = None
     finally:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
