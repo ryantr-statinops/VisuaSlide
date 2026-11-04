@@ -11,7 +11,7 @@ import typer
 from visuaslide import SurveyProject
 from visuaslide.config import load_config
 from visuaslide.exceptions import ConfigurationError, VisuaSlideError
-from visuaslide.google_auth import authorize_desktop
+from visuaslide.google_auth import GoogleCredentialStore, authorize_desktop
 from visuaslide.google_layout_review import download_review_thumbnails
 from visuaslide.publisher import FakeReportPublisher
 from visuaslide.snapshots import SourceSnapshot, utc_now
@@ -124,11 +124,14 @@ def inspect_run_command(
 def refresh_command(
     config: Annotated[Path, typer.Option("--config", exists=True, readable=True)],
     dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
+    non_interactive: Annotated[bool, typer.Option("--non-interactive")] = False,
     fixture_json: Annotated[Path | None, typer.Option("--fixture-json", readable=True)] = None,
 ) -> None:
-    """Refresh from Google or an explicit synthetic offline fixture."""
+    """Refresh from Google or a fixture; scheduler mode checks the token first."""
     try:
         project_config = load_config(config)
+        if non_interactive and fixture_json is None:
+            GoogleCredentialStore(project_config.project_dir).load()
         source = None
         publisher = None
         if fixture_json is not None:

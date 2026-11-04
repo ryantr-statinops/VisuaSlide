@@ -1,6 +1,7 @@
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import patch
 
 from typer.testing import CliRunner
 
@@ -122,3 +123,19 @@ def test_cli_google_refresh_requires_local_authorization(tmp_path) -> None:
 
     assert result.exit_code == 2
     assert "Google token is unavailable" in result.output
+
+
+def test_non_interactive_refresh_fails_before_creating_run_without_token(tmp_path) -> None:
+    config_path, _, _ = _project_files(tmp_path)
+    run_dir = tmp_path / "runtime" / "runs"
+    before = set(run_dir.glob("*.json"))
+
+    with patch("visuaslide.google_auth.InstalledAppFlow") as browser_flow:
+        result = CliRunner().invoke(
+            app, ["refresh", "--config", str(config_path), "--non-interactive"]
+        )
+
+    assert result.exit_code == 2
+    assert "run visuaslide auth" in result.output
+    assert set(run_dir.glob("*.json")) == before
+    browser_flow.assert_not_called()
