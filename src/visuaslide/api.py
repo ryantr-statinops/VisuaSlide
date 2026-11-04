@@ -102,7 +102,9 @@ class SurveyProject:
     def refresh(self, *, dry_run: bool = False) -> RunResult:
         """Acquire and analyze the source, optionally applying a report publisher."""
         if not dry_run and self.publisher is None:
-            raise PublishingError("No report publisher is configured; use dry_run=True offline.")
+            from visuaslide.google_publisher import GoogleReportPublisher
+
+            self.publisher = GoogleReportPublisher.from_config(self.config)
         if dry_run:
             result = self._runner.refresh()
             if result.status != RunStatus.READY or result.analysis is None:
@@ -176,7 +178,9 @@ class SurveyProject:
                 "Resume requires the effective configuration recorded by this run."
             )
         if self.publisher is None:
-            raise PublishingError("No report publisher is configured for run recovery.")
+            from visuaslide.google_publisher import GoogleReportPublisher
+
+            self.publisher = GoogleReportPublisher.from_config(self.config)
 
         analysis_path = Path(self.config.project_dir).resolve() / "analyses" / f"{run_id}.json"
         try:

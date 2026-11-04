@@ -50,6 +50,19 @@ def bootstrap_outputs_command(
     _print_json(result)
 
 
+@app.command("resume")
+def resume_command(
+    config: Annotated[Path, typer.Option("--config", exists=True, readable=True)],
+    run_id: Annotated[str, typer.Option("--run-id")],
+) -> None:
+    """Resume Google publication from the stored run result."""
+    try:
+        result = _project(config).resume(run_id)
+    except VisuaSlideError as exc:
+        _fail(exc)
+    _print_json(result.model_dump(mode="json"))
+
+
 @app.command("validate")
 def validate_command(
     config: Annotated[Path, typer.Option("--config", exists=True, readable=True)],
@@ -100,27 +113,24 @@ def refresh_command(
     dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
     fixture_json: Annotated[Path | None, typer.Option("--fixture-json", readable=True)] = None,
 ) -> None:
-    """Refresh from an explicit offline fixture and optionally publish to a fake output."""
-    if fixture_json is None:
-        _fail(
-            ConfigurationError(
-                "A fixture JSON is required for offline refresh; "
-                "Google source support is not available yet."
-            )
-        )
+    """Refresh from Google or an explicit synthetic offline fixture."""
     try:
         project_config = load_config(config)
-        fixture = json.loads(fixture_json.read_text(encoding="utf-8"))
-        snapshot = SourceSnapshot.capture(
-            project_config.source,
-            headers=tuple(fixture["headers"]),
-            rows=tuple(tuple(row) for row in fixture["rows"]),
-            acquired_at=utc_now(),
-        )
-        publisher = None if dry_run else FakeReportPublisher()
+        source = None
+        publisher = None
+        if fixture_json is not None:
+            fixture = json.loads(fixture_json.read_text(encoding="utf-8"))
+            snapshot = SourceSnapshot.capture(
+                project_config.source,
+                headers=tuple(fixture["headers"]),
+                rows=tuple(tuple(row) for row in fixture["rows"]),
+                acquired_at=utc_now(),
+            )
+            source = FixtureSource(snapshot)
+            publisher = None if dry_run else FakeReportPublisher()
         project = SurveyProject(
             project_config,
-            source=FixtureSource(snapshot),
+            source=source,
             publisher=publisher,
         )
         result = project.refresh(dry_run=dry_run)

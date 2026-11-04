@@ -5,8 +5,11 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
+from googleapiclient.discovery import build
+
 from visuaslide.config import ProjectConfig
 from visuaslide.exceptions import PublishingError
+from visuaslide.google_auth import GoogleCredentialStore
 from visuaslide.google_outputs import ManagedOutputStore, verify_managed_output
 from visuaslide.google_template import template_object_id
 from visuaslide.layouts import build_default_layout
@@ -29,6 +32,14 @@ class GoogleReportPublisher:
         self.store = ManagedOutputStore(config.project_dir)
         self._mapping = self.store.load_or_create().mapping
 
+    @classmethod
+    def from_config(cls, config: ProjectConfig) -> GoogleReportPublisher:
+        credentials = GoogleCredentialStore(config.project_dir).load()
+        sheets = build("sheets", "v4", credentials=credentials, cache_discovery=False)
+        drive = build("drive", "v3", credentials=credentials, cache_discovery=False)
+        slides = build("slides", "v1", credentials=credentials, cache_discovery=False)
+        return cls(config, sheets, drive, slides)
+
     @property
     def mapping(self) -> ManagedObjectMap:
         return self._mapping
@@ -42,6 +53,7 @@ class GoogleReportPublisher:
             return
         if step == "slides":
             self._write_slide_text_tables(content, plan)
+            self._write_slide_charts(content, plan)
             return
         raise PublishingError("Google reporting step is not implemented yet.")
 
@@ -168,7 +180,108 @@ class GoogleReportPublisher:
             except Exception as exc:
                 raise PublishingError("Could not update managed slide text and tables.") from exc
         non_chart_entries = tuple(entry for entry in plan.mapping.entries if entry.kind != "chart")
-        self._mapping = ManagedObjectMap(entries=non_chart_entries)
+        prior_chart_entries = tuple(
+            entry for entry in self._mapping.entries if entry.kind == "chart"
+        )
+        self._mapping = ManagedObjectMap(entries=non_chart_entries + prior_chart_entries)
+        self.store.save(registry.model_copy(update={"mapping": self._mapping}))
+
+    def _write_slide_charts(self, content: PresentationContent, plan: ReportUpdatePlan) -> None:
+        if not content.charts:
+            return
+        registry = self.store.load_or_create()
+        workbook_id = registry.files.get("workbook")
+        deck_id = registry.files.get("presentation")
+        if workbook_id is None or deck_id is None:
+            raise PublishingError("Bootstrap managed Google outputs before chart publication.")
+        for role, file_id in (("workbook", workbook_id), ("presentation", deck_id)):
+            verify_managed_output(
+                self.drive,
+                file_id=file_id,
+                role=role,
+                project_id=registry.project_id,
+                source_spreadsheet_id=self.config.source.spreadsheet_id,
+            )
+        try:
+            workbook = (
+                self.sheets.spreadsheets()
+                .get(
+                    spreadsheetId=workbook_id,
+                    fields="sheets(properties(sheetId,title),charts(chartId))",
+                )
+                .execute()
+            )
+            deck = (
+                self.slides.presentations()
+                .get(
+                    presentationId=deck_id,
+                    fields="slides(objectId,pageElements(objectId,sheetsChart))",
+                )
+                .execute()
+            )
+        except Exception as exc:
+            raise PublishingError("Could not inspect managed linked charts.") from exc
+        source_sheets = {
+            sheet["properties"]["sheetId"]: sheet for sheet in workbook.get("sheets", [])
+        }
+        pages = {page["objectId"]: page for page in deck.get("slides", [])}
+        objects = {
+            item["objectId"]: item
+            for page in pages.values()
+            for item in page.get("pageElements", [])
+        }
+        prior_keys = {entry.object_key for entry in self._mapping.entries if entry.kind == "chart"}
+        requests: list[dict[str, object]] = []
+        for chart in content.charts:
+            key = f"chart:{chart.source_analysis_id}"
+            operation = next(item for item in plan.operations if item.object_key == key)
+            sheet_id, title = managed_sheet_identity(registry.project_id, chart.source_analysis_id)
+            source_sheet = source_sheets.get(sheet_id)
+            if source_sheet is None or source_sheet["properties"]["title"] != title:
+                raise PublishingError("A linked source chart tab is missing or changed.")
+            chart_ids = [item["chartId"] for item in source_sheet.get("charts", [])]
+            if len(chart_ids) != 1:
+                raise PublishingError("A linked source chart is missing or ambiguous.")
+            page_id = template_object_id(f"slide:analysis_{chart.source_analysis_id}")
+            if page_id not in pages:
+                raise PublishingError("A required managed chart slide is missing.")
+            if operation.object_id in objects:
+                requests.append({"refreshSheetsChart": {"objectId": operation.object_id}})
+            elif key in prior_keys:
+                raise PublishingError("A mapped linked chart is missing from Slides.")
+            else:
+                requests.append(
+                    {
+                        "createSheetsChart": {
+                            "objectId": operation.object_id,
+                            "spreadsheetId": workbook_id,
+                            "chartId": chart_ids[0],
+                            "linkingMode": "LINKED",
+                            "elementProperties": {
+                                "pageObjectId": page_id,
+                                "size": {
+                                    "width": {"magnitude": 300, "unit": "PT"},
+                                    "height": {"magnitude": 220, "unit": "PT"},
+                                },
+                                "transform": {
+                                    "scaleX": 1,
+                                    "scaleY": 1,
+                                    "translateX": 380,
+                                    "translateY": 170,
+                                    "unit": "PT",
+                                },
+                            },
+                        }
+                    }
+                )
+        if requests:
+            try:
+                self.slides.presentations().batchUpdate(
+                    presentationId=deck_id, body={"requests": requests}
+                ).execute()
+            except Exception as exc:
+                raise PublishingError("Could not embed or refresh managed linked charts.") from exc
+        self._mapping = plan.mapping
         self.store.save(registry.model_copy(update={"mapping": self._mapping}))
 
     def _write_tables(self, tables: tuple[ReportTable, ...]) -> None:

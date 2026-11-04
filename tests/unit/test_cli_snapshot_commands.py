@@ -115,10 +115,10 @@ def test_cli_refresh_supports_fixture_dry_run_and_fake_publish(tmp_path) -> None
     assert json.loads(published.output)["status"] == "completed"
 
 
-def test_cli_refresh_requires_explicit_fixture_until_google_adapter_exists(tmp_path) -> None:
+def test_cli_google_refresh_requires_local_authorization(tmp_path) -> None:
     config_path, _, _ = _project_files(tmp_path)
 
     result = CliRunner().invoke(app, ["refresh", "--config", str(config_path)])
 
     assert result.exit_code == 2
-    assert "fixture JSON is required" in result.output
+    assert "Google token is unavailable" in result.output

@@ -193,3 +193,85 @@ def test_slide_text_and_table_use_template_ids_and_persist_mapping(tmp_path) -> 
     )
     assert any(item.get("insertText", {}).get("text") == "Valid responses: 3" for item in requests)
     assert publisher.store.load_or_create().mapping == plan.mapping
+
+
+def test_slide_chart_is_linked_once_then_refreshed_by_stable_object_id(tmp_path) -> None:
+    publisher, sheets, registry = _publisher(tmp_path)
+    publisher.store.save(
+        registry.model_copy(
+            update={"files": {"workbook": "workbook-id", "presentation": "deck-id"}}
+        )
+    )
+    workbook_file = {
+        "id": "workbook-id",
+        "mimeType": "application/vnd.google-apps.spreadsheet",
+        "appProperties": {
+            "visuaslide_project": registry.project_id,
+            "visuaslide_role": "workbook",
+        },
+    }
+    deck_file = {
+        "id": "deck-id",
+        "mimeType": "application/vnd.google-apps.presentation",
+        "appProperties": {
+            "visuaslide_project": registry.project_id,
+            "visuaslide_role": "presentation",
+        },
+    }
+    publisher.drive.files.return_value.get.side_effect = lambda fileId, fields: Mock(
+        execute=lambda: workbook_file if fileId == "workbook-id" else deck_file
+    )
+    sheet_id, title = managed_sheet_identity(registry.project_id, "answers")
+    sheets.spreadsheets.return_value.get.return_value.execute.return_value = {
+        "sheets": [
+            {
+                "properties": {"sheetId": sheet_id, "title": title},
+                "charts": [{"chartId": 123}],
+            }
+        ]
+    }
+    slide_id = template_object_id("slide:analysis_answers")
+    publisher.slides.presentations.return_value.get.return_value.execute.return_value = {
+        "slides": [{"objectId": slide_id, "pageElements": []}]
+    }
+    content = PresentationContent(
+        run_id="run-1",
+        snapshot_id="a" * 64,
+        title="Survey",
+        locale="vi-VN",
+        text_blocks=(),
+        tables=(),
+        charts=(
+            ReportChart(
+                object_id="chart_answers",
+                title="Answers",
+                categories=("Yes",),
+                series=(ChartSeries(label="Count", values=(3,)),),
+                source_analysis_id="answers",
+            ),
+        ),
+    )
+    plan = plan_report_update(content)
+    publisher._write_slide_charts(content, plan)
+    request = publisher.slides.presentations.return_value.batchUpdate.call_args.kwargs["body"][
+        "requests"
+    ][0]
+    assert request["createSheetsChart"]["linkingMode"] == "LINKED"
+    assert request["createSheetsChart"]["chartId"] == 123
+    chart_object_id = managed_object_id("chart:answers")
+    assert request["createSheetsChart"]["objectId"] == chart_object_id
+    assert publisher.store.load_or_create().mapping == plan.mapping
+
+    publisher.slides.presentations.return_value.get.return_value.execute.return_value = {
+        "slides": [
+            {
+                "objectId": slide_id,
+                "pageElements": [{"objectId": chart_object_id, "sheetsChart": {}}],
+            }
+        ]
+    }
+    publisher._write_slide_charts(content, plan)
+    request = publisher.slides.presentations.return_value.batchUpdate.call_args.kwargs["body"][
+        "requests"
+    ][0]
+    assert request == {"refreshSheetsChart": {"objectId": chart_object_id}}
