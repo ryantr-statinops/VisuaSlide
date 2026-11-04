@@ -15,6 +15,11 @@ from visuaslide.reporting import PresentationContent
 _OBJECT_NAMESPACE = uuid.UUID("76376a4f-64e1-4f3d-9ec4-ff8a842aa3d8")
 
 
+def managed_object_id(object_key: str) -> str:
+    """Stable Slides object ID for a report element key."""
+    return uuid.uuid5(_OBJECT_NAMESPACE, object_key).hex
+
+
 class ManagedObject(StrictModel):
     """Persisted stable identity for one application-owned presentation element."""
 
@@ -71,7 +76,7 @@ def plan_report_update(
     for object_key, kind, payload in desired:
         digest = _content_hash(payload)
         prior = existing_by_key.get(object_key)
-        object_id = prior.object_id if prior else uuid.uuid5(_OBJECT_NAMESPACE, object_key).hex
+        object_id = prior.object_id if prior else managed_object_id(object_key)
         action = (
             "create" if prior is None else "unchanged" if prior.content_hash == digest else "update"
         )

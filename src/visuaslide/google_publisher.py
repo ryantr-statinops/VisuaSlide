@@ -8,6 +8,8 @@ from typing import Any
 from visuaslide.config import ProjectConfig
 from visuaslide.exceptions import PublishingError
 from visuaslide.google_outputs import ManagedOutputStore, verify_managed_output
+from visuaslide.google_template import template_object_id
+from visuaslide.layouts import build_default_layout
 from visuaslide.reporting import PresentationContent, ReportChart, ReportTable
 from visuaslide.update_plan import ManagedObjectMap, ReportUpdatePlan
 
@@ -25,7 +27,7 @@ class GoogleReportPublisher:
         self.drive = drive
         self.slides = slides
         self.store = ManagedOutputStore(config.project_dir)
-        self._mapping = ManagedObjectMap()
+        self._mapping = self.store.load_or_create().mapping
 
     @property
     def mapping(self) -> ManagedObjectMap:
@@ -38,7 +40,136 @@ class GoogleReportPublisher:
         if step == "charts":
             self._write_charts(content.charts)
             return
+        if step == "slides":
+            self._write_slide_text_tables(content, plan)
+            return
         raise PublishingError("Google reporting step is not implemented yet.")
+
+    def _write_slide_text_tables(
+        self, content: PresentationContent, plan: ReportUpdatePlan
+    ) -> None:
+        registry = self.store.load_or_create()
+        deck_id = registry.files.get("presentation")
+        if deck_id is None:
+            raise PublishingError("Bootstrap the managed presentation before refresh.")
+        verify_managed_output(
+            self.drive,
+            file_id=deck_id,
+            role="presentation",
+            project_id=registry.project_id,
+            source_spreadsheet_id=self.config.source.spreadsheet_id,
+        )
+        try:
+            deck = (
+                self.slides.presentations()
+                .get(
+                    presentationId=deck_id,
+                    fields="slides(objectId,pageElements(objectId,shape,table))",
+                )
+                .execute()
+            )
+        except Exception as exc:
+            raise PublishingError("Could not inspect managed presentation elements.") from exc
+        pages = {page["objectId"]: page for page in deck.get("slides", [])}
+        elements = {
+            item["objectId"]: item
+            for page in pages.values()
+            for item in page.get("pageElements", [])
+        }
+        layout = build_default_layout(content)
+        text_pages = {
+            text_id: template_object_id(f"slide:{slide.slide_key}")
+            for slide in layout.slides
+            for text_id in slide.text_ids
+        }
+        table_pages = {
+            table_id: template_object_id(f"slide:{slide.slide_key}")
+            for slide in layout.slides
+            for table_id in slide.table_ids
+        }
+        prior_keys = {entry.object_key for entry in self._mapping.entries}
+        requests: list[dict[str, object]] = []
+        for operation in plan.operations:
+            if operation.kind in {"title", "text"}:
+                if operation.kind == "text":
+                    page_id = text_pages.get(operation.object_key.removeprefix("text:"))
+                    if page_id not in pages:
+                        raise PublishingError("A required managed text slide is missing.")
+                if operation.object_id not in elements:
+                    raise PublishingError("A required managed text element is missing from Slides.")
+                text = operation.payload["text"]
+                requests.extend(
+                    [
+                        {
+                            "deleteText": {
+                                "objectId": operation.object_id,
+                                "textRange": {"type": "ALL"},
+                            }
+                        },
+                        {"insertText": {"objectId": operation.object_id, "text": str(text)}},
+                    ]
+                )
+            elif operation.kind == "table":
+                table_id = operation.object_id
+                table_content = next(
+                    item
+                    for item in content.tables
+                    if item.source_analysis_id == operation.object_key.removeprefix("table:")
+                )
+                if table_id not in elements and operation.object_key in prior_keys:
+                    raise PublishingError("A mapped managed table is missing from Slides.")
+                page_id = table_pages[table_content.object_id]
+                if page_id not in pages:
+                    raise PublishingError("A required managed analysis slide is missing.")
+                if table_id in elements:
+                    requests.append({"deleteObject": {"objectId": table_id}})
+                requests.append(
+                    {
+                        "createTable": {
+                            "objectId": table_id,
+                            "rows": len(table_content.rows) + 1,
+                            "columns": len(table_content.columns),
+                            "elementProperties": {
+                                "pageObjectId": page_id,
+                                "size": {
+                                    "width": {"magnitude": 300, "unit": "PT"},
+                                    "height": {"magnitude": 200, "unit": "PT"},
+                                },
+                                "transform": {
+                                    "scaleX": 1,
+                                    "scaleY": 1,
+                                    "translateX": 40,
+                                    "translateY": 170,
+                                    "unit": "PT",
+                                },
+                            },
+                        }
+                    }
+                )
+                for row_index, row in enumerate((table_content.columns, *table_content.rows)):
+                    for column_index, value in enumerate(row):
+                        requests.append(
+                            {
+                                "insertText": {
+                                    "objectId": table_id,
+                                    "cellLocation": {
+                                        "rowIndex": row_index,
+                                        "columnIndex": column_index,
+                                    },
+                                    "text": "—" if value is None else str(value),
+                                }
+                            }
+                        )
+        if requests:
+            try:
+                self.slides.presentations().batchUpdate(
+                    presentationId=deck_id, body={"requests": requests}
+                ).execute()
+            except Exception as exc:
+                raise PublishingError("Could not update managed slide text and tables.") from exc
+        non_chart_entries = tuple(entry for entry in plan.mapping.entries if entry.kind != "chart")
+        self._mapping = ManagedObjectMap(entries=non_chart_entries)
+        self.store.save(registry.model_copy(update={"mapping": self._mapping}))
 
     def _write_tables(self, tables: tuple[ReportTable, ...]) -> None:
         registry = self.store.load_or_create()

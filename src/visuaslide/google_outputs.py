@@ -13,6 +13,7 @@ from pydantic import Field
 from visuaslide.config import StrictModel
 from visuaslide.exceptions import PublishingError, StorageError
 from visuaslide.locking import ProjectLock
+from visuaslide.update_plan import ManagedObjectMap
 
 OutputRole = Literal["workbook", "template", "presentation"]
 MIME_TYPES = {
@@ -27,6 +28,7 @@ class ManagedOutputRegistry(StrictModel):
 
     project_id: str = Field(pattern=r"^[0-9a-f-]{36}$")
     files: dict[OutputRole, str] = Field(default_factory=dict)
+    mapping: ManagedObjectMap = Field(default_factory=ManagedObjectMap)
 
 
 class ManagedOutputStore:

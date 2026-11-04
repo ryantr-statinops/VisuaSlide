@@ -8,6 +8,7 @@ from typing import Any
 from visuaslide.exceptions import PublishingError
 from visuaslide.google_outputs import GoogleOutputManager
 from visuaslide.layouts import PresentationLayout
+from visuaslide.update_plan import managed_object_id
 
 _OBJECT_NAMESPACE = uuid.UUID("3f73634d-46d4-448e-b99e-691cb25a88a4")
 
@@ -56,7 +57,13 @@ class GoogleSlidesTemplate:
             elements = [(f"title:{slide.slide_key}", slide.title)]
             elements.extend((f"text:{text_id}", f"{{{{{text_id}}}}}") for text_id in slide.text_ids)
             for index, (key, text) in enumerate(elements):
-                object_id = template_object_id(key)
+                object_id = (
+                    managed_object_id("title:report")
+                    if key == "title:cover"
+                    else managed_object_id(key)
+                    if key.startswith("text:")
+                    else template_object_id(key)
+                )
                 if object_id in existing_elements:
                     continue
                 requests.extend(self._text_box(slide_id, object_id, text, index))

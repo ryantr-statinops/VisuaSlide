@@ -7,7 +7,15 @@ from visuaslide.config import load_config
 from visuaslide.exceptions import PublishingError
 from visuaslide.google_outputs import ManagedOutputStore
 from visuaslide.google_publisher import GoogleReportPublisher, managed_sheet_identity
-from visuaslide.reporting import ChartSeries, ReportChart, ReportTable
+from visuaslide.google_template import template_object_id
+from visuaslide.reporting import (
+    ChartSeries,
+    PresentationContent,
+    ReportChart,
+    ReportTable,
+    ReportText,
+)
+from visuaslide.update_plan import managed_object_id, plan_report_update
 
 ROOT = Path(__file__).parents[2]
 
@@ -125,3 +133,63 @@ def test_existing_chart_is_updated_using_its_google_chart_id(tmp_path) -> None:
     publisher._write_charts((chart,))
     request = sheets.spreadsheets.return_value.batchUpdate.call_args.kwargs["body"]["requests"][0]
     assert request["updateChartSpec"]["chartId"] == 123
+
+
+def test_slide_text_and_table_use_template_ids_and_persist_mapping(tmp_path) -> None:
+    publisher, _, registry = _publisher(tmp_path)
+    publisher.store.save(
+        registry.model_copy(
+            update={"files": {"workbook": "workbook-id", "presentation": "deck-id"}}
+        )
+    )
+    publisher.drive.files.return_value.get.return_value.execute.return_value = {
+        "id": "deck-id",
+        "mimeType": "application/vnd.google-apps.presentation",
+        "appProperties": {
+            "visuaslide_project": registry.project_id,
+            "visuaslide_role": "presentation",
+        },
+    }
+    publisher.slides.presentations.return_value.get.return_value.execute.return_value = {
+        "slides": [
+            {
+                "objectId": template_object_id("slide:cover"),
+                "pageElements": [{"objectId": managed_object_id("title:report"), "shape": {}}],
+            },
+            {
+                "objectId": template_object_id("slide:context"),
+                "pageElements": [{"objectId": managed_object_id("text:sample_size"), "shape": {}}],
+            },
+            {"objectId": template_object_id("slide:analysis_answers"), "pageElements": []},
+        ]
+    }
+    content = PresentationContent(
+        run_id="run-1",
+        snapshot_id="a" * 64,
+        title="Khảo sát",
+        locale="vi-VN",
+        text_blocks=(ReportText(object_id="sample_size", text="Valid responses: 3"),),
+        tables=(
+            ReportTable(
+                object_id="table_answers",
+                title="Answers",
+                columns=("category", "frequency"),
+                rows=(("Yes", 3),),
+                source_analysis_id="answers",
+            ),
+        ),
+        charts=(),
+    )
+    plan = plan_report_update(content)
+
+    publisher.publish_step("slides", content, plan)
+
+    requests = publisher.slides.presentations.return_value.batchUpdate.call_args.kwargs["body"][
+        "requests"
+    ]
+    assert any(
+        item.get("createTable", {}).get("objectId") == managed_object_id("table:answers")
+        for item in requests
+    )
+    assert any(item.get("insertText", {}).get("text") == "Valid responses: 3" for item in requests)
+    assert publisher.store.load_or_create().mapping == plan.mapping
