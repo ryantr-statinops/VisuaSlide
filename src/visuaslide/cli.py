@@ -11,6 +11,7 @@ import typer
 from visuaslide import SurveyProject
 from visuaslide.config import load_config
 from visuaslide.exceptions import ConfigurationError, VisuaSlideError
+from visuaslide.google_auth import authorize_desktop
 from visuaslide.publisher import FakeReportPublisher
 from visuaslide.snapshots import SourceSnapshot, utc_now
 from visuaslide.testing import FixtureSource
@@ -21,6 +22,20 @@ app = typer.Typer(
     no_args_is_help=True,
     add_completion=False,
 )
+
+
+@app.command("auth")
+def auth_command(
+    config: Annotated[Path, typer.Option("--config", exists=True, readable=True)],
+    client_secret: Annotated[Path, typer.Option("--client-secret", exists=True, readable=True)],
+) -> None:
+    """Explicitly open Google desktop consent and save a local token."""
+    try:
+        project_config = load_config(config)
+        token_path = authorize_desktop(client_secret, project_config.project_dir)
+    except VisuaSlideError as exc:
+        _fail(exc)
+    _print_json({"status": "authorized", "token_path": str(token_path)})
 
 
 @app.command("validate")

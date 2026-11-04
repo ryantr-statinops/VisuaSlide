@@ -8,6 +8,7 @@ from pathlib import Path
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
 
 from visuaslide.exceptions import ConfigurationError
 
@@ -64,3 +65,17 @@ class GoogleCredentialStore:
         finally:
             if temporary_path is not None:
                 temporary_path.unlink(missing_ok=True)
+
+
+def authorize_desktop(client_secret: Path, project_dir: Path) -> Path:
+    """Run the explicit desktop consent flow and persist its local token."""
+    try:
+        flow = InstalledAppFlow.from_client_secrets_file(str(client_secret), list(REQUIRED_SCOPES))
+        credentials = flow.run_local_server(host="127.0.0.1", port=0, open_browser=True)
+    except Exception as exc:
+        raise ConfigurationError("Google desktop authorization failed.") from exc
+    if not credentials.has_scopes(REQUIRED_SCOPES):
+        raise ConfigurationError("Google authorization did not grant the required scopes.")
+    store = GoogleCredentialStore(project_dir)
+    store.save(credentials)
+    return store.path
