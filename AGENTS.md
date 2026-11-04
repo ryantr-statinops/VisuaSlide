@@ -4,7 +4,7 @@ VisuaSlide is a Python SDK and CLI for turning survey data from Google Sheets in
 
 ## Current state and authority
 
-The repository is at the foundation-documentation stage. There is no implemented SDK, CLI, Google connector, analysis engine, package manifest, or CI workflow. Treat the architecture below as accepted direction, not working functionality.
+The offline SDK, CLI, analysis engine, package, and CI workflow are implemented through Phase 4. Google adapter code exists through C52, but live Google sandbox and rendered slide acceptance have not run. Treat the Google integration as unverified until those gates pass.
 
 - Read the root `README.md` when present and the files relevant to the task before changing them.
 - Check applicable instructions in directories you change. Apply explicitly invoked skills and their workflows within the user's authorized scope.
@@ -69,7 +69,7 @@ Do not implement the same metric independently in pandas and SQL. Pydantic confi
 
 ## Verification and delivery
 
-- No build, test, lint, or installation commands are established yet. Inspect actual tooling before choosing commands; document commands only after verifying them.
+- The verified local checks are `uv run ruff check src tests`, `uv run ruff format --check src tests`, `uv run pytest tests`, and `uv build --wheel`. Live Google checks remain opt-in and require a separate sandbox.
 - For documentation work, check Markdown structure, terminology, status claims, relative links, and the Git diff.
 - For implementation, test statistical results against independently calculated small fixtures. Cover data validation, source edits/deletions, repeated refreshes, write-target protection, and partial publishing failures as relevant.
 - CI should use synthetic fixtures and mocked Google boundaries. Live integration checks must be explicitly configured against sandbox files; keep them separate from default checks.
