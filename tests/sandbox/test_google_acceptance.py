@@ -18,6 +18,7 @@ from visuaslide.google_publisher import GoogleReportPublisher, managed_sheet_ide
 from visuaslide.google_source import GoogleSheetSource
 from visuaslide.models import AnalysisResult, RunStatus, Scalar
 from visuaslide.reporting import build_presentation_content
+from visuaslide.runs import RunStore
 from visuaslide.storage import SnapshotStore
 
 SANDBOX_CONFIG = os.getenv("VISUASLIDE_SANDBOX_CONFIG")
@@ -247,6 +248,10 @@ def test_sandbox_resume_after_workbook_side_effect_without_source_reacquisition(
     project.bootstrap_outputs()
     before = _source_values(project)
     actual = GoogleReportPublisher.from_config(project.config)
+    if not actual.mapping.entries:
+        assert project.refresh().status == RunStatus.COMPLETED
+        actual = GoogleReportPublisher.from_config(project.config)
+    original_identities = _report_identities(*_read_report(actual))
 
     class FailAfterWorkbook:
         failed = False
@@ -269,15 +274,24 @@ def test_sandbox_resume_after_workbook_side_effect_without_source_reacquisition(
     (run_id,) = new_runs - prior_runs
     failed = project.inspect_run(run_id)
     assert failed.status == RunStatus.FAILED
+    assert failed.stage == failed.error_code == "publish_failed"
     assert failed.analysis is not None
+    store = RunStore(project.config.project_dir)
+    publish_steps = {"workbook", "charts", "slides", "publish"}
+    assert publish_steps.isdisjoint(store.load(run_id).completed_steps)
 
     class MustNotRead:
         def read(self, source):
             raise AssertionError("resume read Google source")
 
-    project.source = MustNotRead()
-    project._runner.source = project.source
-    recovered = project.resume(run_id)
+    reopened = SurveyProject(project.config, source=MustNotRead())
+    recovered = reopened.resume(run_id)
+    assert recovered.run_id == failed.run_id
+    assert recovered.snapshot_id == failed.snapshot_id
     assert recovered.status == RunStatus.COMPLETED
     assert recovered.analysis == failed.analysis
+    assert publish_steps.issubset(store.load(run_id).completed_steps)
+    report = _read_report(actual)
+    assert _report_identities(*report) == original_identities
+    _assert_published_content(actual, report[0], report[2], failed.analysis)
     assert _source_values(project) == before
