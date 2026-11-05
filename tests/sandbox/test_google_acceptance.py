@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +16,9 @@ from visuaslide.google_auth import GoogleCredentialStore
 from visuaslide.google_outputs import MIME_TYPES, ManagedOutputRegistry
 from visuaslide.google_publisher import GoogleReportPublisher, managed_sheet_identity
 from visuaslide.google_source import GoogleSheetSource
-from visuaslide.models import RunStatus
+from visuaslide.models import AnalysisResult, RunStatus, Scalar
+from visuaslide.reporting import build_presentation_content
+from visuaslide.storage import SnapshotStore
 
 SANDBOX_CONFIG = os.getenv("VISUASLIDE_SANDBOX_CONFIG")
 pytestmark = pytest.mark.skipif(not SANDBOX_CONFIG, reason="Google sandbox not configured")
@@ -69,7 +72,8 @@ def _read_report(
         publisher.slides.presentations()
         .get(
             presentationId=registry.files["presentation"],
-            fields="slides(objectId,pageElements(objectId,sheetsChart(spreadsheetId,chartId)))",
+            fields="slides(objectId,pageElements(objectId,sheetsChart(spreadsheetId,chartId),"
+            "shape(text),table(tableRows)))",
         )
         .execute()
     )
@@ -123,6 +127,83 @@ def _report_identities(
     )
 
 
+def _workbook_row(row: Sequence[Scalar]) -> tuple[Scalar, ...]:
+    values = [None if value == "" else value for value in row]
+    while values and values[-1] is None:
+        values.pop()
+    return tuple(values)
+
+
+def _slide_text(container: dict[str, Any]) -> str:
+    return "".join(
+        element.get("textRun", {}).get("content", "")
+        for element in container.get("text", {}).get("textElements", [])
+    ).removesuffix("\n")
+
+
+def _assert_published_content(
+    publisher: GoogleReportPublisher,
+    registry: ManagedOutputRegistry,
+    slides: list[dict[str, Any]],
+    analysis: AnalysisResult,
+) -> None:
+    content = build_presentation_content(analysis, publisher.config.report)
+    by_key = {entry.object_key: entry.object_id for entry in registry.mapping.entries}
+    elements = {
+        item["objectId"]: item for slide in slides for item in slide.get("pageElements", [])
+    }
+    assert _slide_text(elements[by_key["title:report"]]["shape"]) == content.title
+    for block in content.text_blocks:
+        shape = elements[by_key[f"text:{block.object_id}"]]["shape"]
+        assert _slide_text(shape) == block.text
+
+    expected_ranges: dict[str, list[tuple[Scalar, ...]]] = {}
+    for table in content.tables:
+        _, title = managed_sheet_identity(registry.project_id, table.source_analysis_id)
+        rows = [table.columns, *table.rows]
+        expected_ranges[f"'{title}'!A:I"] = rows
+        element = elements[by_key[f"table:{table.source_analysis_id}"]]
+        actual_rows = [
+            [_slide_text(cell) for cell in row["tableCells"]]
+            for row in element["table"]["tableRows"]
+        ]
+        assert actual_rows == [["—" if cell is None else str(cell) for cell in row] for row in rows]
+
+    for chart in content.charts:
+        _, title = managed_sheet_identity(registry.project_id, chart.source_analysis_id)
+        link = elements[by_key[f"chart:{chart.source_analysis_id}"]]["sheetsChart"]
+        assert link["spreadsheetId"] == registry.files["workbook"]
+        expected_ranges[f"'{title}'!J:P"] = [
+            ("category", *(series.label for series in chart.series)),
+            *(
+                (category, *(series.values[index] for series in chart.series))
+                for index, category in enumerate(chart.categories)
+            ),
+        ]
+
+    result = (
+        publisher.sheets.spreadsheets()
+        .values()
+        .batchGet(
+            spreadsheetId=registry.files["workbook"],
+            ranges=list(expected_ranges),
+            valueRenderOption="UNFORMATTED_VALUE",
+        )
+        .execute()
+    )
+    for value_range, (a1_range, rows) in zip(
+        result["valueRanges"], expected_ranges.items(), strict=True
+    ):
+        expected = [
+            tuple(
+                pytest.approx(value, rel=1e-12, abs=1e-12) if isinstance(value, float) else value
+                for value in _workbook_row(row)
+            )
+            for row in rows
+        ]
+        assert [_workbook_row(row) for row in value_range.get("values", [])] == expected, a1_range
+
+
 def test_sandbox_bootstrap_refresh_repeat_and_source_read_only() -> None:
     project = _project()
     before = _source_values(project)
@@ -130,23 +211,35 @@ def test_sandbox_bootstrap_refresh_repeat_and_source_read_only() -> None:
     publisher = GoogleReportPublisher.from_config(project.config)
     first = project.refresh()
     first_report = _read_report(publisher)
+    assert first.status == RunStatus.COMPLETED
+    assert first.analysis is not None
+    _assert_published_content(publisher, first_report[0], first_report[2], first.analysis)
+
     second_outputs = project.bootstrap_outputs()
     second = project.refresh()
     second_report = _read_report(publisher)
 
     assert first_outputs == second_outputs == first_report[0].files
-    assert first.status == second.status == RunStatus.COMPLETED
-    assert first.analysis is not None and second.analysis is not None
+    assert second.status == RunStatus.COMPLETED
+    assert second.analysis is not None
     assert first.analysis.tables == second.analysis.tables
     assert _report_identities(*first_report) == _report_identities(*second_report)
+    _assert_published_content(publisher, second_report[0], second_report[2], second.analysis)
     assert _source_values(project) == before
+
+    store = SnapshotStore(project.config.project_dir)
+    for result in (first, second):
+        assert result.snapshot_id is not None
+        captured = store.load(result.snapshot_id).snapshot
+        assert (captured.headers, captured.rows) == before
 
     expected_rows = os.getenv("VISUASLIDE_SANDBOX_EXPECTED_ROWS")
     if expected_rows:
         assert second.analysis.accepted_rows == int(expected_rows)
     prior_snapshot = os.getenv("VISUASLIDE_SANDBOX_PRIOR_SNAPSHOT")
     if prior_snapshot:
-        assert second.snapshot_id != prior_snapshot
+        prior = store.load(prior_snapshot).snapshot
+        assert (prior.headers, prior.rows) != before, "The scenario did not change source values."
 
 
 def test_sandbox_resume_after_workbook_side_effect_without_source_reacquisition() -> None:
