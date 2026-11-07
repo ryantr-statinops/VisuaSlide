@@ -1,6 +1,6 @@
 # Forking VisuaSlide and using it from another repository
 
-**Status: Implemented and verified for offline development; Open for live Google acceptance.** A GitHub fork contains only commits already pushed to `origin/main`. SDK 0.2.0 is currently on the local `main` branch and has not been pushed; consumers should pin a reviewed commit after it is published. Google API behavior remains unverified until sandbox acceptance passes.
+**Status: Implemented and verified for offline development; Open for live Google acceptance.** A GitHub fork contains only commits already pushed to `origin/main`. Consumers should pin a reviewed commit. Google sandbox and rendered-slide acceptance are tracked as a separate follow-up plan; Google API behavior remains unverified until those checks pass.
 
 There are two supported ways to collaborate:
 
