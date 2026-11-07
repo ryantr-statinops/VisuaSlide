@@ -1,6 +1,6 @@
 """VisuaSlide survey analysis and reporting SDK."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from visuaslide.api import SurveyProject
 from visuaslide.models import AnalysisResult, RunResult, ValidationReport

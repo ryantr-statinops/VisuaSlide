@@ -54,4 +54,4 @@ jobs:
 
       - name: Import built wheel outside the source tree
         run: >-
-          uv run --locked python -I -c "import glob, os, sys; wheels=glob.glob(os.path.join(os.environ['RUNNER_TEMP'], 'wheel-check', '*.whl')); assert len(wheels)==1, wheels; sys.path.insert(0, wheels[0]); import visuaslide; assert visuaslide.__file__.startswith(wheels[0]); assert visuaslide.__version__ == '0.1.0'; print(visuaslide.__version__)"
+          uv run --locked python -I -c "import glob, os, sys; wheels=glob.glob(os.path.join(os.environ['RUNNER_TEMP'], 'wheel-check', '*.whl')); assert len(wheels)==1, wheels; sys.path.insert(0, wheels[0]); import visuaslide; assert visuaslide.__file__.startswith(wheels[0]); assert visuaslide.__version__ == '0.2.0'; print(visuaslide.__version__)"
