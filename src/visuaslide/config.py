@@ -54,6 +54,7 @@ class VariableKind(StrEnum):
     """Supported types for a survey response column."""
 
     CATEGORICAL = "categorical"
+    MULTI_SELECT = "multi_select"
     NUMERIC = "numeric"
     DATETIME = "datetime"
     TEXT = "text"
@@ -68,6 +69,8 @@ class VariableSchema(StrictModel):
     required: bool = False
     missing_values: tuple[str, ...] = ("",)
     categories: tuple[str, ...] = ()
+    aliases: dict[str, str] = Field(default_factory=dict)
+    separator: str = ","
     datetime_format: str | None = None
     timezone: str | None = None
     trim_whitespace: bool = False
@@ -89,10 +92,26 @@ class VariableSchema(StrictModel):
 
     @model_validator(mode="after")
     def check_kind_options(self) -> VariableSchema:
-        if self.kind == VariableKind.CATEGORICAL and not self.categories:
-            raise ValueError("categorical variables require an explicit category list")
-        if self.kind != VariableKind.CATEGORICAL and self.categories:
-            raise ValueError("categories are only valid for categorical variables")
+        if self.kind in {VariableKind.CATEGORICAL, VariableKind.MULTI_SELECT}:
+            if not self.categories:
+                raise ValueError("categorical and multiselect variables require categories")
+        elif self.categories:
+            raise ValueError("categories require a categorical or multiselect variable")
+        if self.kind == VariableKind.MULTI_SELECT:
+            if not self.separator.strip() or self.separator != self.separator.strip():
+                raise ValueError("multiselect separator must be nonblank without outer whitespace")
+            labels = (*self.categories, *self.aliases)
+            if any(not label.strip() or label != label.strip() for label in labels):
+                raise ValueError("multiselect choices and aliases must be nonblank and trimmed")
+            if any(label in self.missing_values for label in labels):
+                raise ValueError("multiselect choices and aliases must not be missing markers")
+            for alias, target in self.aliases.items():
+                if target not in self.categories:
+                    raise ValueError("multiselect aliases must target configured categories")
+                if alias in self.categories and alias != target:
+                    raise ValueError("an alias must not redefine a canonical category")
+        elif self.aliases or self.separator != ",":
+            raise ValueError("aliases and separator require a multiselect variable")
         if self.kind == VariableKind.DATETIME and not self.datetime_format:
             raise ValueError("datetime variables require an explicit datetime_format")
         if self.kind != VariableKind.DATETIME and (self.datetime_format or self.timezone):
@@ -148,6 +167,15 @@ class NumericSummaryAnalysis(StrictModel):
     variable: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
 
 
+class MultiFrequencyAnalysis(StrictModel):
+    """Response-based frequencies of configured multiselect options."""
+
+    id: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    kind: Literal["multi_frequency"]
+    variable: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    denominator: PercentageDenominator
+
+
 class CrosstabAnalysis(StrictModel):
     """A two-variable frequency table with an explicit normalization basis."""
 
@@ -165,7 +193,7 @@ class CrosstabAnalysis(StrictModel):
 
 
 AnalysisSpecification = Annotated[
-    FrequencyAnalysis | NumericSummaryAnalysis | CrosstabAnalysis,
+    FrequencyAnalysis | MultiFrequencyAnalysis | NumericSummaryAnalysis | CrosstabAnalysis,
     Field(discriminator="kind"),
 ]
 
@@ -249,11 +277,16 @@ class ProjectConfig(StrictModel):
 
         variables = {variable.name: variable for variable in self.survey_schema.variables}
         for specification in self.analysis.specifications:
-            if isinstance(specification, FrequencyAnalysis):
+            if isinstance(specification, (FrequencyAnalysis, MultiFrequencyAnalysis)):
                 variable = variables.get(specification.variable)
-                if variable is None or variable.kind != VariableKind.CATEGORICAL:
+                expected_kind = (
+                    VariableKind.MULTI_SELECT
+                    if isinstance(specification, MultiFrequencyAnalysis)
+                    else VariableKind.CATEGORICAL
+                )
+                if variable is None or variable.kind != expected_kind:
                     raise ValueError(
-                        f"frequency analysis {specification.id!r} requires a categorical variable"
+                        f"analysis {specification.id!r} requires a {expected_kind} variable"
                     )
             elif isinstance(specification, NumericSummaryAnalysis):
                 variable = variables.get(specification.variable)
