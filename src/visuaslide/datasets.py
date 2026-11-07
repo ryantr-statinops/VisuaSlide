@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 from visuaslide.exceptions import StorageError
 from visuaslide.models import ValidationReport
@@ -51,7 +53,7 @@ class DatasetStore:
         try:
             self._root.mkdir(parents=True, exist_ok=True)
             if target.exists():
-                existing = pd.read_parquet(target)
+                existing = _read_dataset(target)
                 if not existing.equals(frame):
                     raise StorageError("Stored dataset content does not match this snapshot.")
                 return StoredDataset(snapshot_id, target, len(existing), tuple(existing.columns))
@@ -81,7 +83,7 @@ class DatasetStore:
             return StoredDataset(snapshot_id, target, len(frame), tuple(frame.columns))
         except StorageError:
             raise
-        except (OSError, ValueError, ImportError) as exc:
+        except (OSError, ValueError, TypeError, ImportError) as exc:
             raise StorageError(f"Could not persist validated dataset {snapshot_id}: {exc}") from exc
 
     def load(self, snapshot_id: str) -> pd.DataFrame:
@@ -90,9 +92,16 @@ class DatasetStore:
             raise StorageError("Dataset snapshot ID must be a SHA-256 hex digest.")
         path = self._root / f"{snapshot_id}.parquet"
         try:
-            return pd.read_parquet(path, engine="pyarrow")
-        except (OSError, ValueError, ImportError) as exc:
+            return _read_dataset(path)
+        except (OSError, ValueError, TypeError, ImportError) as exc:
             raise StorageError(f"Could not load validated dataset {snapshot_id}: {exc}") from exc
+
+
+def _read_dataset(path: Path) -> pd.DataFrame:
+    # Override list conversion while retaining pandas metadata for legacy scalar columns.
+    return pq.read_table(path).to_pandas(
+        types_mapper=lambda dtype: pd.ArrowDtype(dtype) if pa.types.is_list(dtype) else None
+    )
 
 
 def _is_snapshot_id(value: str) -> bool:

@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
+import pyarrow as pa
 
 from visuaslide.analysis import calculate_crosstab, calculate_frequency, calculate_numeric_summary
 from visuaslide.config import (
@@ -318,6 +319,12 @@ def prepare_snapshot(
             for variable in config.survey_schema.variables
         }
     )
+    for variable in config.survey_schema.variables:
+        if variable.kind == VariableKind.MULTI_SELECT:
+            frame[variable.name] = pd.Series(
+                [prepared[variable.name][index] for index in kept_indices],
+                dtype=pd.ArrowDtype(pa.list_(pa.string())),
+            )
     return frame, report
 
 
