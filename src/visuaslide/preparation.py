@@ -11,7 +11,6 @@ from visuaslide.config import VariableKind, VariableSchema
 from visuaslide.models import Scalar, ValidationIssue
 from visuaslide.snapshots import SourceSnapshot
 
-
 type PreparedValue = Scalar | tuple[str, ...]
 
 
