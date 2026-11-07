@@ -53,6 +53,7 @@ class GoogleReportPublisher:
     def publish_step(self, step: str, content: PresentationContent, plan: ReportUpdatePlan) -> None:
         if step == "workbook":
             self._write_tables(content.tables)
+            self._remove_obsolete_workbook_objects(plan)
             return
         if step == "charts":
             self._write_charts(content.charts)
@@ -315,7 +316,7 @@ class GoogleReportPublisher:
             for sheet in metadata.get("sheets", [])
         }
         for table in tables:
-            sheet_id, title = managed_sheet_identity(registry.project_id, table.source_analysis_id)
+            sheet_id, title = managed_sheet_identity(registry.project_id, table.publication_key)
             if sheet_id in existing and existing[sheet_id] != title:
                 raise PublishingError("A managed sheet ID collides with another workbook tab.")
             if sheet_id not in existing:
@@ -369,7 +370,7 @@ class GoogleReportPublisher:
             raise PublishingError("Could not inspect managed Sheets charts.") from exc
         sheets = {sheet["properties"]["sheetId"]: sheet for sheet in metadata.get("sheets", [])}
         for chart in charts:
-            sheet_id, title = managed_sheet_identity(registry.project_id, chart.source_analysis_id)
+            sheet_id, title = managed_sheet_identity(registry.project_id, chart.publication_key)
             sheet = sheets.get(sheet_id)
             if sheet is None or sheet["properties"]["title"] != title:
                 raise PublishingError("A managed chart source tab is missing or changed.")
@@ -427,6 +428,60 @@ class GoogleReportPublisher:
                 ).execute()
             except Exception as exc:
                 raise PublishingError("Could not create or update managed Sheets chart.") from exc
+
+    def _remove_obsolete_workbook_objects(self, plan: ReportUpdatePlan) -> None:
+        removed = [entry for entry in plan.removed if entry.kind in {"table", "chart"}]
+        if not removed:
+            return
+        registry = self.store.load_or_create()
+        workbook_id = registry.files["workbook"]
+        verify_managed_output(
+            self.drive,
+            file_id=workbook_id,
+            role="workbook",
+            project_id=registry.project_id,
+            source_spreadsheet_id=self.config.source.spreadsheet_id,
+        )
+        try:
+            workbook = (
+                self.sheets.spreadsheets()
+                .get(spreadsheetId=workbook_id, fields="sheets(properties,charts(chartId))")
+                .execute()
+            )
+            tabs = {tab["properties"]["sheetId"]: tab for tab in workbook.get("sheets", [])}
+            removed_tables = {
+                entry.object_key.removeprefix("table:")
+                for entry in removed
+                if entry.kind == "table"
+            }
+            requests = []
+            for key in dict.fromkeys(entry.object_key.split(":", 1)[1] for entry in removed):
+                sheet_id, title = managed_sheet_identity(registry.project_id, key)
+                tab = tabs.get(sheet_id)
+                if tab is None:
+                    continue
+                if tab["properties"]["title"] != title:
+                    raise PublishingError("An obsolete managed reporting tab was renamed.")
+                if key in removed_tables:
+                    requests.append({"deleteSheet": {"sheetId": sheet_id}})
+                else:
+                    charts = tab.get("charts", [])
+                    if len(charts) > 1:
+                        raise PublishingError("An obsolete managed chart is ambiguous.")
+                    requests.extend(
+                        {"deleteEmbeddedObject": {"objectId": chart["chartId"]}} for chart in charts
+                    )
+                    self.sheets.spreadsheets().values().clear(
+                        spreadsheetId=workbook_id, range=f"'{title}'!J:P", body={}
+                    ).execute()
+            if requests:
+                self.sheets.spreadsheets().batchUpdate(
+                    spreadsheetId=workbook_id, body={"requests": requests}
+                ).execute()
+        except PublishingError:
+            raise
+        except Exception as exc:
+            raise PublishingError("Could not remove obsolete managed workbook objects.") from exc
 
     @staticmethod
     def _chart_spec(chart: ReportChart, sheet_id: int) -> dict[str, object]:
