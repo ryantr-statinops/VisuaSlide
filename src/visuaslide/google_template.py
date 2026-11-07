@@ -35,6 +35,19 @@ class GoogleSlidesTemplate:
         height = page_size.get("height", {}).get("magnitude")
         if not width or not height or abs(width / height - 16 / 9) > 0.01:
             raise PublishingError("The managed presentation is not widescreen 16:9.")
+        requests = self.layout_requests(layout, presentation)
+        if requests:
+            try:
+                self.slides.presentations().batchUpdate(
+                    presentationId=template_id, body={"requests": requests}
+                ).execute()
+            except Exception as exc:
+                raise PublishingError("Could not build the managed Slides template.") from exc
+        return template_id
+
+    @staticmethod
+    def layout_requests(layout: PresentationLayout, presentation: dict) -> list[dict]:
+        """Build deterministic additions, shared by templates and managed presentations."""
         existing_slides = {slide["objectId"]: slide for slide in presentation.get("slides", [])}
         requests: list[dict[str, object]] = []
         for slide in layout.slides:
@@ -66,15 +79,18 @@ class GoogleSlidesTemplate:
                 )
                 if object_id in existing_elements:
                     continue
-                requests.extend(self._text_box(slide_id, object_id, text, index))
+                requests.extend(GoogleSlidesTemplate._text_box(slide_id, object_id, text, index))
         if requests:
-            try:
-                self.slides.presentations().batchUpdate(
-                    presentationId=template_id, body={"requests": requests}
-                ).execute()
-            except Exception as exc:
-                raise PublishingError("Could not build the managed Slides template.") from exc
-        return template_id
+            requests.extend(
+                {
+                    "updateSlidesPosition": {
+                        "slideObjectIds": [template_object_id(f"slide:{slide.slide_key}")],
+                        "insertionIndex": 0,
+                    }
+                }
+                for slide in reversed(layout.slides)
+            )
+        return requests
 
     @staticmethod
     def _text_box(slide_id: str, object_id: str, text: str, index: int) -> list[dict]:

@@ -29,6 +29,8 @@ class ManagedOutputRegistry(StrictModel):
     project_id: str = Field(pattern=r"^[0-9a-f-]{36}$")
     files: dict[OutputRole, str] = Field(default_factory=dict)
     mapping: ManagedObjectMap = Field(default_factory=ManagedObjectMap)
+    pages: dict[str, str] = Field(default_factory=dict)
+    pending_pages: tuple[str, ...] = ()
 
 
 class ManagedOutputStore:

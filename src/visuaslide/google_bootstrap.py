@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from googleapiclient.discovery import build
 
-from visuaslide.config import ProjectConfig
+from visuaslide.config import FrequencyAnalysis, MultiFrequencyAnalysis, ProjectConfig
 from visuaslide.google_auth import GoogleCredentialStore
 from visuaslide.google_outputs import GoogleOutputManager, verify_configured_output_ids
 from visuaslide.google_template import GoogleSlidesTemplate
 from visuaslide.layouts import PresentationLayout, SlideLayout
+from visuaslide.reporting import projection_object_id, report_page_keys
 
 
 def project_template_layout(config: ProjectConfig) -> PresentationLayout:
@@ -27,19 +28,30 @@ def project_template_layout(config: ProjectConfig) -> PresentationLayout:
             text_ids=("sampling_method", "collection_period", "sample_size"),
         ),
     ]
+    variables = {variable.name: variable for variable in config.survey_schema.variables}
     for specification in config.analysis.specifications:
-        slides.append(
-            SlideLayout(
-                slide_key=f"analysis_{specification.id}",
-                role="analysis",
-                title=specification.id.replace("_", " ").capitalize(),
-                text_ids=(f"caption_{specification.id}",),
-                table_ids=(f"table_{specification.id}",),
-                chart_ids=(f"chart_{specification.id}",)
-                if specification.kind != "numeric_summary"
-                else (),
+        keys = (specification.id,)
+        if isinstance(specification, (FrequencyAnalysis, MultiFrequencyAnalysis)):
+            keys = report_page_keys(
+                specification.id, len(variables[specification.variable].categories)
             )
-        )
+        for index, key in enumerate(keys):
+            page_key = key if index else None
+            title = specification.id.replace("_", " ").capitalize()
+            if len(keys) > 1:
+                title += f" ({index + 1}/{len(keys)})"
+            slides.append(
+                SlideLayout(
+                    slide_key=f"analysis_{key}",
+                    role="analysis",
+                    title=title,
+                    text_ids=(projection_object_id("caption", specification.id, page_key),),
+                    table_ids=(projection_object_id("table", specification.id, page_key),),
+                    chart_ids=(projection_object_id("chart", specification.id, page_key),)
+                    if specification.kind != "numeric_summary"
+                    else (),
+                )
+            )
     slides.append(
         SlideLayout(
             slide_key="conclusion",

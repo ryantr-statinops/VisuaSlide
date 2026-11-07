@@ -22,7 +22,7 @@ def report_page_keys(analysis_id: str, category_count: int) -> tuple[str, ...]:
     )
 
 
-def _projection_id(kind: str, analysis_id: str, page_key: str | None) -> str:
+def projection_object_id(kind: str, analysis_id: str, page_key: str | None) -> str:
     if page_key is None:
         return f"{kind}_{analysis_id}"
     return f"{kind}__page_{hashlib.sha256(page_key.encode()).hexdigest()[:24]}"
@@ -144,7 +144,7 @@ def build_presentation_content(
 
 def _table_projection(table: AnalysisTable, page_key: str | None = None) -> ReportTable:
     return ReportTable(
-        object_id=_projection_id("table", table.analysis_id, page_key),
+        object_id=projection_object_id("table", table.analysis_id, page_key),
         title=_humanize(table.analysis_id),
         columns=table.columns,
         rows=table.rows,
@@ -184,7 +184,7 @@ def _chart_projection(table: AnalysisTable, page_key: str | None = None) -> Repo
     else:
         return None
     return ReportChart(
-        object_id=_projection_id("chart", table.analysis_id, page_key),
+        object_id=projection_object_id("chart", table.analysis_id, page_key),
         title=_humanize(table.analysis_id),
         categories=categories,
         series=series,
@@ -204,7 +204,7 @@ def _table_caption(table: AnalysisTable, page_key: str | None = None) -> ReportT
         )
     body = "; ".join(rendered_rows)
     return ReportText(
-        object_id=_projection_id("caption", table.analysis_id, page_key),
+        object_id=projection_object_id("caption", table.analysis_id, page_key),
         text=f"{_humanize(table.analysis_id)} — {body}",
         source_analysis_id=table.analysis_id,
         page_key=page_key,
