@@ -62,6 +62,7 @@ class RunManifest(StrictModel):
             source_hash=_sha256(source_identity),
             config_hash=effective_config_hash(config),
             sdk_version=__version__,
+            template_version="2",
         )
 
 
@@ -116,7 +117,13 @@ def _sha256(value: object) -> str:
 
 def effective_config_hash(config: ProjectConfig) -> str:
     """Return the canonical hash used to bind a run to its effective config."""
-    return _sha256(config.model_dump(mode="json", by_alias=True))
+    payload = config.model_dump(mode="json", by_alias=True)
+    # Omit additive defaults so configurations recorded by 0.1 remain replayable.
+    for variable in payload["schema"]["variables"]:
+        for name, default in (("aliases", {}), ("separator", ","), ("allowed_values", None)):
+            if variable.get(name) == default:
+                variable.pop(name, None)
+    return _sha256(payload)
 
 
 def _atomic_write(path: Path, content: bytes, *, replace: bool) -> None:

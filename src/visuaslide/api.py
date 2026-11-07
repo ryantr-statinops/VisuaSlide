@@ -19,9 +19,10 @@ from visuaslide.layouts import build_default_layout
 from visuaslide.locking import ProjectLock
 from visuaslide.models import AnalysisResult, RunResult, RunStatus, ValidationReport
 from visuaslide.pipeline import SurveyRunner
+from visuaslide.publications import PublicationStore, SavedPublication
 from visuaslide.reporting import PresentationContent
 from visuaslide.retry import RetryPolicy, call_with_retries
-from visuaslide.runs import RunManifest, RunStore, effective_config_hash
+from visuaslide.runs import RunManifest, RunStore, _sha256, effective_config_hash
 from visuaslide.snapshots import SourceReader
 from visuaslide.update_plan import ReportUpdatePlan, plan_report_update
 
@@ -192,7 +193,7 @@ class SurveyProject:
 
         with ProjectLock(self.config.project_dir):
             try:
-                self._publish_checkpoints(run_id, analysis)
+                self._publish_checkpoints(run_id, analysis, resuming=True)
             except Exception as exc:
                 self._update_manifest(
                     run_id,
@@ -218,19 +219,51 @@ class SurveyProject:
             completed_step="publish",
         )
 
-    def _publish_checkpoints(self, run_id: str, analysis: AnalysisResult) -> None:
+    def _publish_checkpoints(
+        self, run_id: str, analysis: AnalysisResult, *, resuming: bool = False
+    ) -> None:
         from visuaslide.reporting import build_presentation_content
 
         publish_step = getattr(self.publisher, "publish_step", None)
         if publish_step is None:
             raise PublishingError("The configured publisher does not support checkpoints.")
-        content = build_presentation_content(analysis, self.config.report)
+        store = PublicationStore(self.config.project_dir)
+        saved = store.load(run_id)
+        manifest = self._runs.load(run_id)
+        if saved is None:
+            if (
+                resuming
+                and manifest.template_version is not None
+                and manifest.status != RunStatus.READY
+            ):
+                raise StorageError("The versioned run is missing its saved publication plan.")
+            version = "1" if resuming and manifest.template_version is None else "2"
+            content = build_presentation_content(
+                analysis, self.config.report, layout_version=version
+            )
+            try:
+                build_default_layout(content)
+            except PublishingError as exc:
+                if version == "1":
+                    raise PublishingError(
+                        "Legacy report layout overflow; start a new refresh to use pagination."
+                    ) from exc
+                raise
+            plan = plan_report_update(content, self.publisher.mapping)
+            saved = SavedPublication(
+                analysis_hash=_sha256(analysis.model_dump(mode="json")), content=content, plan=plan
+            )
+            store.save(saved)
+        saved.verify_analysis(analysis)
+        content, plan = saved.content, saved.plan
+        if manifest.template_version not in {None, content.layout_version}:
+            raise StorageError("Saved publication layout version does not match the run.")
         build_default_layout(content)
-        plan = plan_report_update(content, self.publisher.mapping)
         manifest = self._update_manifest(
             run_id,
             status=RunStatus.PUBLISHING,
             stage="publishing",
+            template_version=content.layout_version,
         )
         for step in ("workbook", "charts", "slides"):
             if step in manifest.completed_steps:
@@ -279,6 +312,7 @@ class SurveyProject:
         stage: str,
         error_code: str | None = None,
         completed_step: str | None = None,
+        template_version: str | None = None,
     ) -> RunManifest:
         manifest = self._runs.load(run_id)
         steps = manifest.completed_steps
@@ -292,6 +326,7 @@ class SurveyProject:
                 "error_code": error_code,
                 "completed_steps": steps,
                 "updated_at": datetime.now(UTC),
+                "template_version": template_version or manifest.template_version,
             }
         )
         self._runs.save(updated)
