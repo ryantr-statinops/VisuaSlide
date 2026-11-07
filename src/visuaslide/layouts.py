@@ -84,24 +84,24 @@ def build_default_layout(
             )
         )
 
-    chart_ids_by_analysis = {item.source_analysis_id: item.object_id for item in content.charts}
+    chart_ids_by_analysis = {item.publication_key: item.object_id for item in content.charts}
     caption_ids_by_analysis = {
-        item.source_analysis_id: item.object_id
+        (item.page_key or item.source_analysis_id): item.object_id
         for item in content.text_blocks
         if item.object_id.startswith("caption_") and item.source_analysis_id
     }
     for table in content.tables:
         slides.append(
             SlideLayout(
-                slide_key=f"analysis_{table.source_analysis_id}",
+                slide_key=f"analysis_{table.publication_key}",
                 role="analysis",
                 title=table.title,
-                text_ids=(caption_ids_by_analysis[table.source_analysis_id],)
-                if table.source_analysis_id in caption_ids_by_analysis
+                text_ids=(caption_ids_by_analysis[table.publication_key],)
+                if table.publication_key in caption_ids_by_analysis
                 else (),
                 table_ids=(table.object_id,),
-                chart_ids=(chart_ids_by_analysis[table.source_analysis_id],)
-                if table.source_analysis_id in chart_ids_by_analysis
+                chart_ids=(chart_ids_by_analysis[table.publication_key],)
+                if table.publication_key in chart_ids_by_analysis
                 else (),
             )
         )

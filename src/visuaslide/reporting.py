@@ -2,12 +2,30 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import Literal
 
 from pydantic import Field
 
 from visuaslide.config import ReportConfig, StrictModel
 from visuaslide.models import AnalysisResult, AnalysisTable, Scalar
+
+CATEGORIES_PER_PAGE = 10
+type LayoutVersion = Literal["1", "2"]
+
+
+def report_page_keys(analysis_id: str, category_count: int) -> tuple[str, ...]:
+    """Retain the first page key and keep continuation keys outside analysis-ID syntax."""
+    return tuple(
+        analysis_id if offset == 0 else f"{analysis_id}/page/{offset // CATEGORIES_PER_PAGE + 1}"
+        for offset in range(0, max(category_count, 1), CATEGORIES_PER_PAGE)
+    )
+
+
+def _projection_id(kind: str, analysis_id: str, page_key: str | None) -> str:
+    if page_key is None:
+        return f"{kind}_{analysis_id}"
+    return f"{kind}__page_{hashlib.sha256(page_key.encode()).hexdigest()[:24]}"
 
 
 class ReportText(StrictModel):
@@ -16,6 +34,7 @@ class ReportText(StrictModel):
     object_id: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
     text: str
     source_analysis_id: str | None = None
+    page_key: str | None = None
 
 
 class ReportTable(StrictModel):
@@ -26,6 +45,11 @@ class ReportTable(StrictModel):
     columns: tuple[str, ...]
     rows: tuple[tuple[Scalar, ...], ...]
     source_analysis_id: str
+    page_key: str | None = None
+
+    @property
+    def publication_key(self) -> str:
+        return self.page_key or self.source_analysis_id
 
 
 class ChartSeries(StrictModel):
@@ -44,6 +68,11 @@ class ReportChart(StrictModel):
     categories: tuple[str, ...]
     series: tuple[ChartSeries, ...]
     source_analysis_id: str
+    page_key: str | None = None
+
+    @property
+    def publication_key(self) -> str:
+        return self.page_key or self.source_analysis_id
 
 
 class PresentationContent(StrictModel):
@@ -56,10 +85,11 @@ class PresentationContent(StrictModel):
     text_blocks: tuple[ReportText, ...]
     tables: tuple[ReportTable, ...]
     charts: tuple[ReportChart, ...]
+    layout_version: LayoutVersion = "1"
 
 
 def build_presentation_content(
-    analysis: AnalysisResult, report: ReportConfig
+    analysis: AnalysisResult, report: ReportConfig, *, layout_version: LayoutVersion = "2"
 ) -> PresentationContent:
     """Build text, tables, and chart projections from one AnalysisResult."""
     texts = [ReportText(object_id="sample_size", text=f"Valid responses: {analysis.accepted_rows}")]
@@ -73,11 +103,32 @@ def build_presentation_content(
         ReportText(object_id=object_id, text=value) for object_id, value in authored_fields if value
     )
 
-    tables = tuple(_table_projection(table) for table in analysis.tables)
-    charts = tuple(
-        chart for table in analysis.tables if (chart := _chart_projection(table)) is not None
-    )
-    texts.extend(_table_caption(table) for table in analysis.tables)
+    tables = []
+    charts = []
+    for table in analysis.tables:
+        keys = (
+            report_page_keys(table.analysis_id, len(table.rows))
+            if layout_version == "2" and {"category", "frequency"}.issubset(table.columns)
+            else (table.analysis_id,)
+        )
+        for index, key in enumerate(keys):
+            page_key = key if index else None
+            page = table
+            if len(keys) > 1:
+                start = index * CATEGORIES_PER_PAGE
+                page = table.model_copy(
+                    update={"rows": table.rows[start : start + CATEGORIES_PER_PAGE]}
+                )
+            projection = _table_projection(page, page_key)
+            if len(keys) > 1:
+                projection = projection.model_copy(
+                    update={"title": f"{projection.title} ({index + 1}/{len(keys)})"}
+                )
+            tables.append(projection)
+            chart = _chart_projection(page, page_key)
+            if chart is not None:
+                charts.append(chart.model_copy(update={"title": projection.title}))
+            texts.append(_table_caption(page, page_key))
 
     return PresentationContent(
         run_id=analysis.run_id,
@@ -85,22 +136,24 @@ def build_presentation_content(
         title=report.title,
         locale=report.locale,
         text_blocks=tuple(texts),
-        tables=tables,
-        charts=charts,
+        tables=tuple(tables),
+        charts=tuple(charts),
+        layout_version=layout_version,
     )
 
 
-def _table_projection(table: AnalysisTable) -> ReportTable:
+def _table_projection(table: AnalysisTable, page_key: str | None = None) -> ReportTable:
     return ReportTable(
-        object_id=f"table_{table.analysis_id}",
+        object_id=_projection_id("table", table.analysis_id, page_key),
         title=_humanize(table.analysis_id),
         columns=table.columns,
         rows=table.rows,
         source_analysis_id=table.analysis_id,
+        page_key=page_key,
     )
 
 
-def _chart_projection(table: AnalysisTable) -> ReportChart | None:
+def _chart_projection(table: AnalysisTable, page_key: str | None = None) -> ReportChart | None:
     if "category" in table.columns and "frequency" in table.columns:
         category_index = table.columns.index("category")
         value_index = table.columns.index("frequency")
@@ -131,15 +184,16 @@ def _chart_projection(table: AnalysisTable) -> ReportChart | None:
     else:
         return None
     return ReportChart(
-        object_id=f"chart_{table.analysis_id}",
+        object_id=_projection_id("chart", table.analysis_id, page_key),
         title=_humanize(table.analysis_id),
         categories=categories,
         series=series,
         source_analysis_id=table.analysis_id,
+        page_key=page_key,
     )
 
 
-def _table_caption(table: AnalysisTable) -> ReportText:
+def _table_caption(table: AnalysisTable, page_key: str | None = None) -> ReportText:
     rendered_rows = []
     for row in table.rows:
         rendered_rows.append(
@@ -150,9 +204,10 @@ def _table_caption(table: AnalysisTable) -> ReportText:
         )
     body = "; ".join(rendered_rows)
     return ReportText(
-        object_id=f"caption_{table.analysis_id}",
+        object_id=_projection_id("caption", table.analysis_id, page_key),
         text=f"{_humanize(table.analysis_id)} — {body}",
         source_analysis_id=table.analysis_id,
+        page_key=page_key,
     )
 
 
