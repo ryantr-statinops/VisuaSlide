@@ -1,6 +1,6 @@
 # Multiselect configuration and report pagination
 
-**Status — Implemented and verified offline.** Google sandbox and rendered slide acceptance remain **Open**. See [the decision record](decisions/0001-multiselect-and-pagination.md) and the [current project status](../README.md#project-status).
+**Status — Implemented and verified offline.** Google sandbox and rendered-slide acceptance are deferred to a separate follow-up plan and remain **Open**. See [the decision record](decisions/0001-multiselect-and-pagination.md) and the [current project status](../README.md#project-status).
 
 ## Configure and replay synthetic data
 
