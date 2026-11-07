@@ -49,7 +49,7 @@ Snapshot validation, analysis, and run inspection operate only on local artifact
 
 The SDK stores each refresh result and publish checkpoint under the configured runtime directory. If a fake publisher raises during publication, inspect the run with `project.inspect_run(run_id)`, then resume the same run with `project.resume(run_id)`. Resume uses the saved analysis and skips completed checkpoints; it does not read the source again. The CLI also exposes `visuaslide resume --config <config> --run-id <run-id>` for Google publication recovery.
 
-This verifies local recovery semantics only. It does not establish that Google workbook or Slides operations can be resumed safely; that requires Phase 5 sandbox acceptance.
+This verifies local recovery semantics only. It does not establish that Google workbook or Slides operations can be resumed safely; those live checks are part of the separate Phase 5 sandbox acceptance plan.
 
 ## Checks used by the repository
 
