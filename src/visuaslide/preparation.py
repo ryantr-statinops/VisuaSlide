@@ -12,12 +12,15 @@ from visuaslide.models import Scalar, ValidationIssue
 from visuaslide.snapshots import SourceSnapshot
 
 
+type PreparedValue = Scalar | tuple[str, ...]
+
+
 @dataclass(frozen=True)
 class PreparedColumn:
     """Normalized values and safe validation issues for one declared column."""
 
     variable_name: str
-    values: tuple[Scalar, ...]
+    values: tuple[PreparedValue, ...]
     issues: tuple[ValidationIssue, ...] = ()
 
     @property
@@ -107,6 +110,87 @@ def prepare_categorical_column(
         values=tuple(values),
         issues=tuple(issues),
     )
+
+
+def parse_multiselect(value: str, variable: VariableSchema) -> tuple[str, ...]:
+    """Match whole configured choices, including choices containing the separator."""
+    choices = {category: category for category in variable.categories} | variable.aliases
+    candidates = sorted(choices, key=len, reverse=True)
+    remaining = value.strip()
+    selected = set()
+    if not remaining:
+        raise ValueError("A nonmissing multiselect answer must contain a configured choice.")
+    while remaining:
+        for label in candidates:
+            if not remaining.startswith(label):
+                continue
+            suffix = remaining[len(label) :].lstrip()
+            if suffix and not suffix.startswith(variable.separator):
+                continue
+            selected.add(choices[label])
+            remaining = suffix[len(variable.separator) :].strip() if suffix else ""
+            break
+        else:
+            raise ValueError("A multiselect answer contains an unrecognized choice.")
+    return tuple(category for category in variable.categories if category in selected)
+
+
+def prepare_multiselect_column(
+    snapshot: SourceSnapshot, variable: VariableSchema
+) -> PreparedColumn:
+    """Normalize choices without changing the raw snapshot or hiding invalid fragments."""
+    if variable.kind != VariableKind.MULTI_SELECT:
+        raise ValueError("prepare_multiselect_column requires a multiselect variable")
+    try:
+        column_index = snapshot.headers.index(variable.source_header)
+    except ValueError:
+        return PreparedColumn(
+            variable.name,
+            (),
+            (
+                ValidationIssue(
+                    code="missing_configured_header",
+                    message="A configured survey column is missing from the source.",
+                    variable=variable.name,
+                    source_row=snapshot.metadata.header_row,
+                ),
+            ),
+        )
+    values: list[PreparedValue] = []
+    issues = []
+    for offset, row in enumerate(snapshot.rows):
+        source_row = snapshot.source_first_row + offset
+        value = row[column_index] if column_index < len(row) else None
+        candidate = value.strip() if isinstance(value, str) and variable.trim_whitespace else value
+        normalized = None
+        if candidate is None or (
+            isinstance(candidate, str) and candidate in variable.missing_values
+        ):
+            if variable.required and not _is_blank_source_row(row):
+                issues.append(
+                    ValidationIssue(
+                        code="required_value_missing",
+                        message="A required multiselect answer is missing.",
+                        variable=variable.name,
+                        source_row=source_row,
+                    )
+                )
+        else:
+            try:
+                if not isinstance(candidate, str):
+                    raise ValueError("A multiselect answer must be text.")
+                normalized = parse_multiselect(candidate, variable)
+            except ValueError:
+                issues.append(
+                    ValidationIssue(
+                        code="invalid_multiselect",
+                        message="A multiselect answer must contain only configured choices.",
+                        variable=variable.name,
+                        source_row=source_row,
+                    )
+                )
+        values.append(normalized)
+    return PreparedColumn(variable.name, tuple(values), tuple(issues))
 
 
 def prepare_numeric_column(snapshot: SourceSnapshot, variable: VariableSchema) -> PreparedColumn:

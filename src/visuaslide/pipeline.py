@@ -33,6 +33,7 @@ from visuaslide.preparation import (
     PreparedColumn,
     prepare_categorical_column,
     prepare_datetime_column,
+    prepare_multiselect_column,
     prepare_numeric_column,
 )
 from visuaslide.retry import RetryPolicy, call_with_retries
@@ -274,6 +275,8 @@ def prepare_snapshot(
     for variable in config.survey_schema.variables:
         if variable.kind == VariableKind.CATEGORICAL:
             column = prepare_categorical_column(snapshot, variable)
+        elif variable.kind == VariableKind.MULTI_SELECT:
+            column = prepare_multiselect_column(snapshot, variable)
         elif variable.kind == VariableKind.NUMERIC:
             column = prepare_numeric_column(snapshot, variable)
         elif variable.kind == VariableKind.DATETIME:
