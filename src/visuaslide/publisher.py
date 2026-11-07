@@ -113,8 +113,21 @@ class FakeReportPublisher:
             applied_keys.add(operation.object_key)
 
         target.clear()
+        removed_keys = set()
+        for entry in plan.removed:
+            if (
+                step == "slides"
+                or (step == "workbook" and entry.kind == "table")
+                or (step == "charts" and entry.kind == "chart")
+            ):
+                next_objects.pop(entry.object_id, None)
+                removed_keys.add(entry.object_key)
         target.update(next_objects)
-        entries = {entry.object_key: entry for entry in self._mapping.entries}
+        entries = {
+            entry.object_key: entry
+            for entry in self._mapping.entries
+            if entry.object_key not in removed_keys
+        }
         entries.update(
             {
                 entry.object_key: entry

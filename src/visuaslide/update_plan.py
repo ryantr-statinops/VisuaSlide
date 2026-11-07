@@ -10,7 +10,7 @@ from typing import Literal
 from pydantic import Field, model_validator
 
 from visuaslide.config import StrictModel
-from visuaslide.reporting import PresentationContent
+from visuaslide.reporting import LayoutVersion, PresentationContent
 
 _OBJECT_NAMESPACE = uuid.UUID("76376a4f-64e1-4f3d-9ec4-ff8a842aa3d8")
 
@@ -60,6 +60,8 @@ class ReportUpdatePlan(StrictModel):
     snapshot_id: str
     operations: tuple[PlannedObjectUpdate, ...]
     mapping: ManagedObjectMap
+    removed: tuple[ManagedObject, ...] = ()
+    layout_version: LayoutVersion = "1"
 
 
 def plan_report_update(
@@ -70,7 +72,7 @@ def plan_report_update(
     current = existing or ManagedObjectMap()
     existing_by_key = {entry.object_key: entry for entry in current.entries}
     desired = _desired_objects(content)
-    next_by_key = dict(existing_by_key)
+    next_by_key = {}
     operations = []
 
     for object_key, kind, payload in desired:
@@ -101,6 +103,8 @@ def plan_report_update(
         snapshot_id=content.snapshot_id,
         operations=tuple(operations),
         mapping=ManagedObjectMap(entries=tuple(next_by_key.values())),
+        removed=tuple(entry for entry in current.entries if entry.object_key not in next_by_key),
+        layout_version=content.layout_version,
     )
 
 
@@ -109,15 +113,23 @@ def _desired_objects(content: PresentationContent) -> list[tuple[str, str, dict[
         ("title:report", "title", {"text": content.title, "locale": content.locale})
     ]
     desired.extend(
-        (f"text:{item.object_id}", "text", item.model_dump(mode="json"))
+        (f"text:{item.object_id}", "text", item.model_dump(mode="json", exclude={"page_key"}))
         for item in content.text_blocks
     )
     desired.extend(
-        (f"table:{item.source_analysis_id}", "table", item.model_dump(mode="json"))
+        (
+            f"table:{item.publication_key}",
+            "table",
+            item.model_dump(mode="json", exclude={"page_key"}),
+        )
         for item in content.tables
     )
     desired.extend(
-        (f"chart:{item.source_analysis_id}", "chart", item.model_dump(mode="json"))
+        (
+            f"chart:{item.publication_key}",
+            "chart",
+            item.model_dump(mode="json", exclude={"page_key"}),
+        )
         for item in content.charts
     )
     return desired
