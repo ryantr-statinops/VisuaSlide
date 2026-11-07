@@ -8,6 +8,7 @@ import pandas as pd
 from visuaslide.config import (
     CrosstabAnalysis,
     FrequencyAnalysis,
+    MultiFrequencyAnalysis,
     NumericSummaryAnalysis,
     PercentageBasis,
     PercentageDenominator,
@@ -21,21 +22,31 @@ from visuaslide.models import AnalysisTable
 def calculate_frequency(
     frame: pd.DataFrame,
     variable: VariableSchema,
-    specification: FrequencyAnalysis,
+    specification: FrequencyAnalysis | MultiFrequencyAnalysis,
 ) -> AnalysisTable:
     """Calculate ordered category counts and percentages with explicit denominators."""
     if specification.variable != variable.name:
         raise ValueError("frequency specification and variable do not match")
     if variable.name not in frame.columns:
         raise DataValidationError("Frequency input is missing a prepared variable.")
+    if (
+        isinstance(specification, MultiFrequencyAnalysis)
+        and variable.kind != VariableKind.MULTI_SELECT
+    ):
+        raise ValueError("multiselect frequencies require a prepared multiselect variable")
 
     identifier = _quote_identifier(variable.name)
     connection = duckdb.connect(database=":memory:")
     try:
         connection.register("survey_data", frame)
+        choices_query = (
+            f"(SELECT UNNEST({identifier}) AS {identifier} FROM survey_data)"
+            if isinstance(specification, MultiFrequencyAnalysis)
+            else "survey_data"
+        )
         counts = dict(
             connection.execute(
-                f"SELECT {identifier}, COUNT(*) FROM survey_data "
+                f"SELECT {identifier}, COUNT(*) FROM {choices_query} "
                 f"WHERE {identifier} IS NOT NULL GROUP BY {identifier}"
             ).fetchall()
         )

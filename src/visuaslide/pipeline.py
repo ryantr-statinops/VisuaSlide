@@ -16,6 +16,7 @@ from visuaslide.analysis import calculate_crosstab, calculate_frequency, calcula
 from visuaslide.config import (
     CrosstabAnalysis,
     FrequencyAnalysis,
+    MultiFrequencyAnalysis,
     NumericSummaryAnalysis,
     ProjectConfig,
     VariableKind,
@@ -341,7 +342,7 @@ def analyze_frame(
     variables = {variable.name: variable for variable in config.survey_schema.variables}
     tables = []
     for specification in config.analysis.specifications:
-        if isinstance(specification, FrequencyAnalysis):
+        if isinstance(specification, (FrequencyAnalysis, MultiFrequencyAnalysis)):
             tables.append(
                 calculate_frequency(frame, variables[specification.variable], specification)
             )
