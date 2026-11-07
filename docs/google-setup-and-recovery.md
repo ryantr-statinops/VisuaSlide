@@ -1,6 +1,6 @@
 # Google sandbox setup and run recovery
 
-**Status: Open for live acceptance.** The Google adapters and opt-in tests exist, but a real OAuth sandbox, source edits, and rendered slides still need verification. Use synthetic responses only until that gate passes.
+**Status: Open; tracked as a separate follow-up acceptance plan.** The Google adapters and opt-in tests exist, but a real OAuth sandbox, source edits, and rendered slides still need verification. Use synthetic responses only until that gate passes. This live acceptance is separate from the completed offline implementation checks for SDK 0.2.0.
 
 ## Prepare a private sandbox
 
