@@ -1,0 +1,33 @@
+project_dir = "../.visuaslide/multiselect-example"
+
+[source]
+spreadsheet_id = "REPLACE_WITH_SYNTHETIC_SANDBOX_ID"
+sheet_id = 0
+header_row = 1
+column_range = "A:E"
+
+[schema]
+variables = [
+  { name = "response_id", source_header = "Response ID", kind = "text", required = true },
+  { name = "faculty", source_header = "Faculty", kind = "categorical", categories = ["Khoa Công nghệ thông tin", "Khoa Dược", "Khoa Khoa học thể thao", "Khoa Khoa học xã hội và Nhân văn", "Khoa Khoa học ứng dụng", "Khoa Kế toán", "Khoa Kỹ thuật công trình", "Khoa Luật", "Khoa Mỹ thuật công nghiệp", "Khoa Ngoại ngữ", "Khoa Quản trị kinh doanh", "Khoa Toán - Thống kê", "Khoa Điện - Điện tử"] },
+  { name = "certificates", source_header = "Certificates", kind = "multi_select", categories = ["IELTS", "TOEIC", "APTIS", "PET (Cambridge)"], aliases = { Pet = "PET (Cambridge)", "Cambridge (PET)" = "PET (Cambridge)", "PET Cambridge" = "PET (Cambridge)" }, trim_whitespace = true },
+  { name = "wanted_info", source_header = "Wanted information", kind = "multi_select", categories = ["So sánh IELTS, TOEIC và APTIS", "Lộ trình học và ôn thi"], trim_whitespace = true },
+  { name = "score", source_header = "Score", kind = "numeric", allowed_values = [1, 2, 3, 4, 5] },
+]
+
+[analysis]
+specifications = [
+  { id = "faculty_counts", kind = "frequency", variable = "faculty", denominator = "non_missing" },
+  { id = "certificate_counts", kind = "multi_frequency", variable = "certificates", denominator = "non_missing" },
+  { id = "wanted_info_counts", kind = "multi_frequency", variable = "wanted_info", denominator = "all_responses" },
+  { id = "score_summary", kind = "numeric_summary", variable = "score" },
+]
+
+[report]
+title = "Khảo sát giả lập về lựa chọn chứng chỉ tiếng Anh"
+locale = "vi-VN"
+display_timezone = "Asia/Ho_Chi_Minh"
+research_question = "Các lựa chọn trong mẫu giả lập phân bố như thế nào?"
+sampling_method = "Dữ liệu giả lập dùng để kiểm chứng phần mềm."
+collection_period = "2026-11-07"
+conclusion = "Chỉ sử dụng kết quả này để kiểm chứng phần mềm."

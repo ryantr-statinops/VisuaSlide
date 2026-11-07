@@ -1,0 +1,8 @@
+{
+  "headers": ["Response ID", "Faculty", "Certificates", "Wanted information", "Score"],
+  "rows": [
+    ["synthetic-001", "Khoa Công nghệ thông tin", "IELTS, IELTS, Pet, ", "So sánh IELTS, TOEIC và APTIS, Lộ trình học và ôn thi", 5],
+    ["synthetic-002", "Khoa Dược", "IELTS", "So sánh IELTS, TOEIC và APTIS", 3],
+    ["synthetic-003", "Khoa Điện - Điện tử", "", "", null]
+  ]
+}
