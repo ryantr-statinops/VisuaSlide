@@ -12,6 +12,8 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    StrictFloat,
+    StrictInt,
     ValidationError,
     field_validator,
     model_validator,
@@ -72,9 +74,7 @@ class VariableSchema(StrictModel):
     categories: tuple[str, ...] = ()
     aliases: dict[str, str] = Field(default_factory=dict)
     separator: str = ","
-    allowed_values: tuple[Annotated[int | float, Field(strict=True)], ...] | None = Field(
-        default=None, min_length=1
-    )
+    allowed_values: tuple[StrictInt | StrictFloat, ...] | None = Field(default=None, min_length=1)
     datetime_format: str | None = None
     timezone: str | None = None
     trim_whitespace: bool = False
