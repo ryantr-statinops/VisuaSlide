@@ -255,6 +255,16 @@ def prepare_numeric_column(snapshot: SourceSnapshot, variable: VariableSchema) -
                     source_row=source_row,
                 )
             )
+        elif variable.allowed_values is not None and value not in variable.allowed_values:
+            normalized = None
+            issues.append(
+                ValidationIssue(
+                    code="numeric_value_not_allowed",
+                    message="A numeric value is outside the configured allowed-value set.",
+                    variable=variable.name,
+                    source_row=source_row,
+                )
+            )
         else:
             normalized = value
         values.append(normalized)

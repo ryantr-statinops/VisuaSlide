@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import tomllib
 from enum import StrEnum
 from pathlib import Path
@@ -71,6 +72,9 @@ class VariableSchema(StrictModel):
     categories: tuple[str, ...] = ()
     aliases: dict[str, str] = Field(default_factory=dict)
     separator: str = ","
+    allowed_values: tuple[Annotated[int | float, Field(strict=True)], ...] | None = Field(
+        default=None, min_length=1
+    )
     datetime_format: str | None = None
     timezone: str | None = None
     trim_whitespace: bool = False
@@ -92,6 +96,13 @@ class VariableSchema(StrictModel):
 
     @model_validator(mode="after")
     def check_kind_options(self) -> VariableSchema:
+        if self.allowed_values is not None:
+            if self.kind != VariableKind.NUMERIC:
+                raise ValueError("allowed_values requires a numeric variable")
+            if any(not math.isfinite(value) for value in self.allowed_values):
+                raise ValueError("numeric allowed values must be finite")
+            if len(self.allowed_values) != len(set(self.allowed_values)):
+                raise ValueError("numeric allowed values must be unique")
         if self.kind in {VariableKind.CATEGORICAL, VariableKind.MULTI_SELECT}:
             if not self.categories:
                 raise ValueError("categorical and multiselect variables require categories")
