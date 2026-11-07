@@ -6,7 +6,7 @@ VisuaSlide is a Python SDK and CLI for turning one survey tab into reproducible 
 
 ## Project status
 
-**SDK 0.2.0 multiselect analysis and paginated reporting are implemented and verified offline on the local `main` branch.** Local checks passed on 7 November 2026: Ruff lint and format, 220 tests passed, 3 opt-in Google sandbox checks skipped because no sandbox is configured, wheel build, and import from the built wheel outside the source tree. These commits are still local and have not been pushed. Google sandbox acceptance and rendered slide review remain **Open**, so Phase 5 is not complete. Windows Task Scheduler remains **Open** for Phase 6. Do not treat Google adapters or scheduling as verified against Google or Windows Task Scheduler.
+**SDK 0.2.0 multiselect analysis and paginated reporting are implemented and verified offline.** Local checks passed on 7 November 2026: Ruff lint and format, 220 tests passed, 3 opt-in Google sandbox checks skipped because no sandbox is configured, wheel build, and import from the built wheel outside the source tree. Google sandbox acceptance and rendered slide review are deferred to a separate follow-up plan and remain **Open**; do not treat Google adapters as verified against Google. Windows Task Scheduler remains **Open** for Phase 6 and has not been verified.
 
 See [the offline workflow](docs/offline-workflow.md) for verified setup and run commands, [Google sandbox setup](docs/google-setup-and-recovery.md) for opt-in live checks, [fork and consumer setup](docs/collaborating-and-consuming.md) for collaboration, and [local scheduling](docs/local-scheduling.md) after live acceptance. All current examples and automated tests use synthetic data.
 
@@ -142,12 +142,12 @@ Local scheduling depends on the machine and required environment being available
 
 - **Wave 1 — offline foundation and analysis:** implemented locally through C01–C22. The full snapshot-to-analysis suite uses synthetic fixtures and passed locally.
 - **Wave 2 — offline pipeline and reporting:** implemented locally through C38. SDK/CLI, fake publishing, locking, bounded retries, checkpoints, resume, idempotency, and failure recovery use synthetic data and adapters.
-- **Wave 3 — Google services and operation:** C39–C53 adapters and scheduler preflight remain subject to live verification. SDK 0.2.0 adds configured multiselect analysis and paginated reports; offline tests pass on the local branch. Google sandbox and visual acceptance are **Open**. Scheduling is documented but not enabled or live-verified.
+- **Wave 3 — Google services and operation:** C39–C53 adapters and scheduler preflight remain subject to live verification. SDK 0.2.0 adds configured multiselect analysis and paginated reports; offline tests pass. Google sandbox and visual acceptance will be handled in a separate follow-up plan and remain **Open**. Scheduling is documented but not enabled or live-verified.
 
 The planned live acceptance target remains: change a response in the source, run one refresh, and see the correct aggregate table, chart, and descriptive text update together. Repeating the refresh must not duplicate managed objects, and the source must remain unchanged. Offline regression tests cover these behaviors through fake adapters; the target has not yet been tested against Google.
 
 ## Working in this repository
 
-Read [AGENTS.md](AGENTS.md) before contributing. Install the locked environment with `uv sync --all-groups`; verified test and packaging commands are listed in [the offline workflow](docs/offline-workflow.md). The 0.2.0 commits are local and await review before any push. Live Google behavior remains unverified until sandbox acceptance passes.
+Read [AGENTS.md](AGENTS.md) before contributing. Install the locked environment with `uv sync --all-groups`; verified test and packaging commands are listed in [the offline workflow](docs/offline-workflow.md). The Google sandbox and rendered-slide checks are tracked separately from the offline implementation and must pass before claiming live verification.
 
 Documentation changes should be checked for structure, relative links, consistent status labels, and a clean Git diff. Future implementation checks should cover independently calculated statistical fixtures, invalid inputs, source edits/deletions, repeated refreshes, write-target protection, and partial publishing failures. Live Google integration checks should use dedicated synthetic sandbox files and remain separate from default CI.
