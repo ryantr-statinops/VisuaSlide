@@ -1,6 +1,6 @@
 # Multiselect configuration and report pagination
 
-**Status — Accepted for implementation.** Local verification and Google acceptance are separate gates. See [the decision record](decisions/0001-multiselect-and-pagination.md).
+**Status — Implemented and verified offline.** Google sandbox and rendered slide acceptance remain **Open**. See [the decision record](decisions/0001-multiselect-and-pagination.md) and the [current project status](../README.md#project-status).
 
 ## Configure and replay synthetic data
 
