@@ -137,4 +137,5 @@ class FakeReportPublisher:
         )
         self._mapping = ManagedObjectMap(entries=tuple(entries.values()))
         if step == "slides":
+            self._mapping = plan.mapping
             self._layout = layout
