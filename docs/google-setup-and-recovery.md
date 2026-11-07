@@ -79,3 +79,13 @@ uv run --locked pytest tests/sandbox -q
 - Run `review-layout` after the suite for each scenario and apply [the visual checklist](google-layout-review.md). Record pass or fail for each step, the date, and the Git revision. Keep responses, IDs, screenshots, and logs private.
 
 Clear the sandbox environment variables before running the offline suite. Live tests are skipped without `VISUASLIDE_SANDBOX_CONFIG`.
+
+## Paginated multiselect acceptance
+
+Use a separate synthetic source with the headers and rows from [the multiselect example](../examples/multiselect.example.json). Copy [its TOML](../examples/multiselect.example.toml) to a private `*.local.toml`, set that source's IDs and a distinct project directory, and authenticate there. Keep the example's thirteen faculty categories, including those with zero responses.
+
+Point `VISUASLIDE_SANDBOX_CONFIG` at this private TOML and set `VISUASLIDE_SANDBOX_EXPECTED_ROWS` to `3`. Clear `VISUASLIDE_SANDBOX_PRIOR_SNAPSHOT` for the baseline. Run the full live suite. Its pagination case reads back both faculty pages, checks their tables and chart links, and downloads every thumbnail. Image download success still requires manual visual review.
+
+For an add scenario, append `synthetic-004`, faculty `Khoa Luật`, certificates `TOEIC`, blank wanted information, and score `4`. Expected certificate counts are IELTS 2 / 3, PET 1 / 3, and TOEIC 1 / 3. Edit the second response's certificates from IELTS to TOEIC, giving IELTS 1 / 3 and TOEIC 2 / 3. Delete the added row, giving IELTS 1 / 2, TOEIC 1 / 2, and PET 1 / 2. Update expected rows to 4, 4, then 3. Each state must retain faculty pages of ten and three categories and stable managed IDs.
+
+After each state, run the live suite, inspect all thumbnails for Vietnamese text and table or caption overflow, and compare page percentages with the full analysis. Record the tested Git revision and scenario outcomes privately. Runs using the original six-column example skip the additional pagination case.

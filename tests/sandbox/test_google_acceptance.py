@@ -13,10 +13,12 @@ from googleapiclient.discovery import build
 from visuaslide import SurveyProject
 from visuaslide.exceptions import PublishingError
 from visuaslide.google_auth import GoogleCredentialStore
+from visuaslide.google_layout_review import download_review_thumbnails
 from visuaslide.google_outputs import MIME_TYPES, ManagedOutputRegistry
 from visuaslide.google_publisher import GoogleReportPublisher, managed_sheet_identity
 from visuaslide.google_source import GoogleSheetSource
 from visuaslide.models import AnalysisResult, RunStatus, Scalar
+from visuaslide.publications import PublicationStore
 from visuaslide.reporting import build_presentation_content
 from visuaslide.runs import RunStore
 from visuaslide.storage import SnapshotStore
@@ -160,10 +162,10 @@ def _assert_published_content(
 
     expected_ranges: dict[str, list[tuple[Scalar, ...]]] = {}
     for table in content.tables:
-        _, title = managed_sheet_identity(registry.project_id, table.source_analysis_id)
+        _, title = managed_sheet_identity(registry.project_id, table.publication_key)
         rows = [table.columns, *table.rows]
         expected_ranges[f"'{title}'!A:I"] = rows
-        element = elements[by_key[f"table:{table.source_analysis_id}"]]
+        element = elements[by_key[f"table:{table.publication_key}"]]
         actual_rows = [
             [_slide_text(cell) for cell in row["tableCells"]]
             for row in element["table"]["tableRows"]
@@ -171,8 +173,8 @@ def _assert_published_content(
         assert actual_rows == [["—" if cell is None else str(cell) for cell in row] for row in rows]
 
     for chart in content.charts:
-        _, title = managed_sheet_identity(registry.project_id, chart.source_analysis_id)
-        link = elements[by_key[f"chart:{chart.source_analysis_id}"]]["sheetsChart"]
+        _, title = managed_sheet_identity(registry.project_id, chart.publication_key)
+        link = elements[by_key[f"chart:{chart.publication_key}"]]["sheetsChart"]
         assert link["spreadsheetId"] == registry.files["workbook"]
         expected_ranges[f"'{title}'!J:P"] = [
             ("category", *(series.label for series in chart.series)),
@@ -294,4 +296,43 @@ def test_sandbox_resume_after_workbook_side_effect_without_source_reacquisition(
     report = _read_report(actual)
     assert _report_identities(*report) == original_identities
     _assert_published_content(actual, report[0], report[2], failed.analysis)
+    assert _source_values(project) == before
+
+
+def test_sandbox_paginated_multiselect_report() -> None:
+    project = _project()
+    variables = {variable.name: variable for variable in project.config.survey_schema.variables}
+    faculty = next(
+        (
+            specification
+            for specification in project.config.analysis.specifications
+            if specification.kind == "frequency"
+            and len(variables[specification.variable].categories) == 13
+        ),
+        None,
+    )
+    if faculty is None or not any(
+        specification.kind == "multi_frequency"
+        for specification in project.config.analysis.specifications
+    ):
+        pytest.skip("Configure the synthetic 13-category multiselect sandbox example.")
+    before = _source_values(project)
+    project.bootstrap_outputs()
+    result = project.refresh()
+    assert result.status == RunStatus.COMPLETED
+    publication = PublicationStore(project.config.project_dir).load(result.run_id)
+    assert publication.content.layout_version == "2"
+    pages = [
+        table for table in publication.content.tables if table.source_analysis_id == faculty.id
+    ]
+    assert [len(table.rows) for table in pages] == [10, 3]
+    full_table = next(table for table in result.analysis.tables if table.analysis_id == faculty.id)
+    assert tuple(row for table in pages for row in table.rows) == full_table.rows
+    publisher = GoogleReportPublisher.from_config(project.config)
+    report = _read_report(publisher)
+    _report_identities(*report)
+    _assert_published_content(publisher, report[0], report[2], result.analysis)
+    thumbnails = download_review_thumbnails(project.config)
+    assert len(thumbnails) == len(report[2])
+    assert all(path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n") for path in thumbnails)
     assert _source_values(project) == before
