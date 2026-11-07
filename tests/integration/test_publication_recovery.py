@@ -73,7 +73,16 @@ def _legacy_project(tmp_path, *, thirteen=False):
         )
         config = config.model_copy(
             update={
-                "survey_schema": config.survey_schema.model_copy(update={"variables": variables})
+                "survey_schema": config.survey_schema.model_copy(update={"variables": variables}),
+                "analysis": config.analysis.model_copy(
+                    update={
+                        "specifications": tuple(
+                            spec
+                            for spec in config.analysis.specifications
+                            if spec.kind != "crosstab"
+                        )
+                    }
+                ),
             }
         )
     fixture = json.loads((root / "tests/fixtures/synthetic_responses.json").read_bytes())
