@@ -15,7 +15,7 @@ from visuaslide.google_outputs import (
     verify_configured_output_ids,
     verify_managed_output,
 )
-from visuaslide.google_template import template_object_id
+from visuaslide.google_template import GoogleSlidesTemplate, template_object_id
 from visuaslide.layouts import build_default_layout
 from visuaslide.reporting import PresentationContent, ReportChart, ReportTable
 from visuaslide.update_plan import ManagedObjectMap, ReportUpdatePlan
@@ -59,10 +59,95 @@ class GoogleReportPublisher:
             self._write_charts(content.charts)
             return
         if step == "slides":
+            if content.layout_version == "2":
+                self._ensure_slide_pages(content, plan)
             self._write_slide_text_tables(content, plan)
             self._write_slide_charts(content, plan)
             return
         raise PublishingError("Google reporting step is not implemented yet.")
+
+    def _ensure_slide_pages(self, content: PresentationContent, plan: ReportUpdatePlan) -> None:
+        registry = self.store.load_or_create()
+        deck_id = registry.files.get("presentation")
+        if deck_id is None:
+            raise PublishingError("Bootstrap the managed presentation before refresh.")
+        verify_managed_output(
+            self.drive,
+            file_id=deck_id,
+            role="presentation",
+            project_id=registry.project_id,
+            source_spreadsheet_id=self.config.source.spreadsheet_id,
+        )
+        try:
+            deck = (
+                self.slides.presentations()
+                .get(presentationId=deck_id, fields="slides(objectId,pageElements(objectId))")
+                .execute()
+            )
+        except Exception as exc:
+            raise PublishingError("Could not inspect managed report pages.") from exc
+        layout = build_default_layout(content)
+        desired = {
+            slide.slide_key: template_object_id(f"slide:{slide.slide_key}")
+            for slide in layout.slides
+        }
+        previous = dict(registry.pages)
+        # Legacy maps register table identities, from which the original analysis pages follow.
+        for entry in registry.mapping.entries:
+            if entry.kind == "table":
+                key = f"analysis_{entry.object_key.removeprefix('table:')}"
+                previous.setdefault(key, template_object_id(f"slide:{key}"))
+        pages = {page["objectId"]: page for page in deck.get("slides", [])}
+        elements = {
+            item["objectId"]: page["objectId"]
+            for page in pages.values()
+            for item in page.get("pageElements", [])
+        }
+        for key, page_id in previous.items():
+            if key in desired and page_id != desired[key]:
+                raise PublishingError("A registered report page identity does not match.")
+            if key in desired and page_id not in pages and key not in registry.pending_pages:
+                raise PublishingError("A previously managed report page is missing.")
+        desired_ids = {operation.object_id for operation in plan.operations}
+        for entry in registry.mapping.entries:
+            if entry.object_id in desired_ids and entry.object_id not in elements:
+                raise PublishingError("A previously managed report element is missing.")
+
+        obsolete_ids = {page_id for key, page_id in previous.items() if key not in desired}
+        requests = [
+            {"deleteObject": {"objectId": page_id}}
+            for page_id in sorted(obsolete_ids)
+            if page_id in pages
+        ]
+        requests.extend(
+            {"deleteObject": {"objectId": entry.object_id}}
+            for entry in plan.removed
+            if entry.object_id in elements and elements[entry.object_id] not in obsolete_ids
+        )
+        requests.extend(GoogleSlidesTemplate.layout_requests(layout, deck))
+        for slide in layout.slides:
+            title_id = template_object_id(f"title:{slide.slide_key}")
+            if title_id in elements:
+                requests.extend(
+                    [
+                        {"deleteText": {"objectId": title_id, "textRange": {"type": "ALL"}}},
+                        {"insertText": {"objectId": title_id, "text": slide.title}},
+                    ]
+                )
+        pending = tuple(sorted(set(registry.pending_pages) | (desired.keys() - previous.keys())))
+        self.store.save(
+            registry.model_copy(update={"pages": previous | desired, "pending_pages": pending})
+        )
+        if requests:
+            try:
+                self.slides.presentations().batchUpdate(
+                    presentationId=deck_id, body={"requests": requests}
+                ).execute()
+            except Exception as exc:
+                raise PublishingError(
+                    "Could not reconcile managed report pages; resume this run."
+                ) from exc
+        self.store.save(registry.model_copy(update={"pages": desired, "pending_pages": ()}))
 
     def _write_slide_text_tables(
         self, content: PresentationContent, plan: ReportUpdatePlan
@@ -133,7 +218,7 @@ class GoogleReportPublisher:
                 table_content = next(
                     item
                     for item in content.tables
-                    if item.source_analysis_id == operation.object_key.removeprefix("table:")
+                    if item.publication_key == operation.object_key.removeprefix("table:")
                 )
                 if table_id not in elements and operation.object_key in prior_keys:
                     raise PublishingError("A mapped managed table is missing from Slides.")
@@ -195,6 +280,9 @@ class GoogleReportPublisher:
 
     def _write_slide_charts(self, content: PresentationContent, plan: ReportUpdatePlan) -> None:
         if not content.charts:
+            self._mapping = plan.mapping
+            registry = self.store.load_or_create()
+            self.store.save(registry.model_copy(update={"mapping": self._mapping}))
             return
         registry = self.store.load_or_create()
         workbook_id = registry.files.get("workbook")
@@ -240,16 +328,16 @@ class GoogleReportPublisher:
         prior_keys = {entry.object_key for entry in self._mapping.entries if entry.kind == "chart"}
         requests: list[dict[str, object]] = []
         for chart in content.charts:
-            key = f"chart:{chart.source_analysis_id}"
+            key = f"chart:{chart.publication_key}"
             operation = next(item for item in plan.operations if item.object_key == key)
-            sheet_id, title = managed_sheet_identity(registry.project_id, chart.source_analysis_id)
+            sheet_id, title = managed_sheet_identity(registry.project_id, chart.publication_key)
             source_sheet = source_sheets.get(sheet_id)
             if source_sheet is None or source_sheet["properties"]["title"] != title:
                 raise PublishingError("A linked source chart tab is missing or changed.")
             chart_ids = [item["chartId"] for item in source_sheet.get("charts", [])]
             if len(chart_ids) != 1:
                 raise PublishingError("A linked source chart is missing or ambiguous.")
-            page_id = template_object_id(f"slide:analysis_{chart.source_analysis_id}")
+            page_id = template_object_id(f"slide:analysis_{chart.publication_key}")
             if page_id not in pages:
                 raise PublishingError("A required managed chart slide is missing.")
             if operation.object_id in objects:
